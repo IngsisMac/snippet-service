@@ -5,6 +5,10 @@ plugins {
 group = "ingsis.snippet"
 version = "0.1.0"
 
+tasks.bootJar {
+    archiveFileName.set("app.jar")
+}
+
 repositories {
     mavenLocal()
     mavenCentral()
