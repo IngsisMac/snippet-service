@@ -94,4 +94,42 @@ class HttpRunnerClientTest {
         assertEquals(listOf("1"), response.actualOutputs)
         mockServer.verify()
     }
+
+    @Test
+    fun shouldReturnFormattedContentWhenRunnerFormatsSnippet() {
+        mockServer
+            .expect(requestTo("http://runner-service:8082/runner/format"))
+            .andExpect(method(HttpMethod.POST))
+            .andExpect(jsonPath("$.content").value("let x=10;"))
+            .andRespond(
+                withSuccess(
+                    """{"formattedContent":"let x = 10;"}""",
+                    MediaType.APPLICATION_JSON,
+                ),
+            )
+
+        val formatted = runnerClient.format("let x=10;", "1.1")
+
+        assertEquals("let x = 10;", formatted)
+        mockServer.verify()
+    }
+
+    @Test
+    fun shouldReturnLintFindingsWhenRunnerLintsSnippet() {
+        mockServer
+            .expect(requestTo("http://runner-service:8082/runner/lint"))
+            .andExpect(method(HttpMethod.POST))
+            .andRespond(
+                withSuccess(
+                    """{"findings":[{"message":"Bad naming","line":1,"column":5}],"findingsCount":1}""",
+                    MediaType.APPLICATION_JSON,
+                ),
+            )
+
+        val result = runnerClient.lint("let x = 1;", "1.1")
+
+        assertEquals(1, result.findingsCount)
+        assertEquals("Bad naming", result.findings[0].message)
+        mockServer.verify()
+    }
 }

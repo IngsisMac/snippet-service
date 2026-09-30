@@ -30,7 +30,30 @@ class FakePermissionClient : PermissionClient {
         snippetMap[userId] = level
     }
 
+    private val lintRules = ConcurrentHashMap<String, Map<String, Any>>()
+    private val formatRules = ConcurrentHashMap<String, Map<String, Any>>()
+
+    fun setLintRules(
+        userId: String,
+        rules: Map<String, Any>,
+    ) {
+        lintRules[userId] = rules
+    }
+
+    fun setFormatRules(
+        userId: String,
+        rules: Map<String, Any>,
+    ) {
+        formatRules[userId] = rules
+    }
+
+    override fun getLintRules(userId: String): Map<String, Any> = lintRules[userId] ?: emptyMap()
+
+    override fun getFormatRules(userId: String): Map<String, Any> = formatRules[userId] ?: emptyMap()
+
     fun clear() {
         permissions.clear()
+        lintRules.clear()
+        formatRules.clear()
     }
 }

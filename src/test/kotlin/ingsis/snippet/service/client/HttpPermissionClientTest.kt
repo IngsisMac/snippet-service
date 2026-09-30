@@ -83,4 +83,42 @@ class HttpPermissionClientTest {
         assertEquals(PermissionLevel.NONE, level)
         mockServer.verify()
     }
+
+    @Test
+    fun shouldGetLintRulesSuccessfully() {
+        val userId = "auth0|user1"
+        mockServer
+            .expect(requestTo("http://permission-service:8081/api/permissions/rules/lint/auth0%7Cuser1"))
+            .andExpect(method(HttpMethod.GET))
+            .andRespond(
+                withSuccess(
+                    """{"userId":"auth0|user1","rulesVersion":1,"rules":{"printscript.no-println":true}}""",
+                    MediaType.APPLICATION_JSON,
+                ),
+            )
+
+        val rules = permissionClient.getLintRules(userId)
+
+        assertEquals(true, rules["printscript.no-println"])
+        mockServer.verify()
+    }
+
+    @Test
+    fun shouldGetFormatRulesSuccessfully() {
+        val userId = "auth0|user1"
+        mockServer
+            .expect(requestTo("http://permission-service:8081/api/permissions/rules/format/auth0%7Cuser1"))
+            .andExpect(method(HttpMethod.GET))
+            .andRespond(
+                withSuccess(
+                    """{"userId":"auth0|user1","rulesVersion":1,"rules":{"printscript.space-before-colon":true}}""",
+                    MediaType.APPLICATION_JSON,
+                ),
+            )
+
+        val rules = permissionClient.getFormatRules(userId)
+
+        assertEquals(true, rules["printscript.space-before-colon"])
+        mockServer.verify()
+    }
 }

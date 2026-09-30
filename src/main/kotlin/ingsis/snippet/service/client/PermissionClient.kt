@@ -13,4 +13,8 @@ interface PermissionClient {
         snippetId: UUID,
         userId: String,
     ): PermissionLevel
+
+    fun getLintRules(userId: String): Map<String, Any>
+
+    fun getFormatRules(userId: String): Map<String, Any>
 }

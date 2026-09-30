@@ -114,4 +114,38 @@ class SnippetControllerTest {
             ).andExpect(status().isOk)
             .andExpect(jsonPath("$.content").value("println(\"hello\");"))
     }
+
+    @Test
+    fun shouldFormatSnippetEndpoint() {
+        whenever(snippetService.formatSnippet(eq(sampleSnippet.id), any()))
+            .thenReturn("let a = 1;")
+
+        mockMvc
+            .perform(
+                post("/api/snippets/{id}/format", sampleSnippet.id)
+                    .with(jwt().jwt { it.subject("auth0|123") }),
+            ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.formattedContent").value("let a = 1;"))
+    }
+
+    @Test
+    fun shouldLintSnippetEndpoint() {
+        val report =
+            ingsis.snippet.service.controller.dto.LintReportResponse(
+                snippetId = sampleSnippet.id,
+                status = ComplianceStatus.COMPLIANT,
+                findings = emptyList(),
+                findingsCount = 0,
+            )
+        whenever(snippetService.lintSnippet(eq(sampleSnippet.id), any()))
+            .thenReturn(report)
+
+        mockMvc
+            .perform(
+                post("/api/snippets/{id}/lint", sampleSnippet.id)
+                    .with(jwt().jwt { it.subject("auth0|123") }),
+            ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("COMPLIANT"))
+            .andExpect(jsonPath("$.findingsCount").value(0))
+    }
 }

@@ -21,3 +21,9 @@ data class AssignOwnerResponse(
     val permission: PermissionLevel,
     val createdAt: Instant,
 )
+
+data class UserRulesResponse(
+    val userId: String,
+    val rulesVersion: Int = 1,
+    val rules: Map<String, Any> = emptyMap(),
+)

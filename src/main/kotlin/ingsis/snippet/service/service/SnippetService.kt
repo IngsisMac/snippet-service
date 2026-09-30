@@ -4,6 +4,7 @@ import ingsis.snippet.service.client.PermissionClient
 import ingsis.snippet.service.client.RunnerClient
 import ingsis.snippet.service.client.dto.PermissionLevel
 import ingsis.snippet.service.controller.dto.CreateSnippetRequest
+import ingsis.snippet.service.controller.dto.LintReportResponse
 import ingsis.snippet.service.controller.dto.SnippetResponse
 import ingsis.snippet.service.controller.dto.UpdateSnippetRequest
 import ingsis.snippet.service.domain.model.ComplianceStatus
@@ -105,6 +106,57 @@ class SnippetService(
     }
 
     @Transactional(readOnly = true)
+    fun formatSnippet(
+        id: UUID,
+        userId: String = "anonymous",
+    ): String {
+        val snippet =
+            snippetRepository.findById(id).orElseThrow {
+                ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
+            }
+        assertCanView(snippet, userId)
+
+        val rules = permissionClient.getFormatRules(userId)
+        val content = snippetStore.get(id) ?: snippet.content
+        return runnerClient.format(content, snippet.version, rules)
+    }
+
+    @Transactional
+    fun lintSnippet(
+        id: UUID,
+        userId: String = "anonymous",
+    ): LintReportResponse {
+        val snippet =
+            snippetRepository.findById(id).orElseThrow {
+                ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
+            }
+        assertCanView(snippet, userId)
+
+        val rules = permissionClient.getLintRules(userId)
+        val content = snippetStore.get(id) ?: snippet.content
+        val result = runnerClient.lint(content, snippet.version, rules)
+        val complianceStatus = updateLintComplianceStatus(id, result.findingsCount)
+
+        return LintReportResponse(
+            snippetId = id,
+            status = complianceStatus,
+            findings = result.findings,
+            findingsCount = result.findingsCount,
+        )
+    }
+
+    private fun updateLintComplianceStatus(
+        snippetId: UUID,
+        findingsCount: Int,
+    ): ComplianceStatus {
+        val status = statusRepository.findById(snippetId).orElse(SnippetStatus(snippetId = snippetId))
+        status.status = if (findingsCount == 0) ComplianceStatus.COMPLIANT else ComplianceStatus.NOT_COMPLIANT
+        status.findingsCount = findingsCount
+        status.lastCheckedAt = Instant.now()
+        return statusRepository.save(status).status
+    }
+
+    @Transactional(readOnly = true)
     fun listSnippets(
         ownerId: String,
         pageable: Pageable,
@@ -177,6 +229,17 @@ class SnippetService(
             permission == PermissionLevel.OWNER || permission == PermissionLevel.WRITE || snippet.ownerId == userId
         if (!canEdit) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to edit this snippet")
+        }
+    }
+
+    private fun assertCanView(
+        snippet: Snippet,
+        userId: String,
+    ) {
+        val permission = permissionClient.getPermission(snippet.id, userId)
+        val hasAccess = permission != PermissionLevel.NONE || snippet.ownerId == userId
+        if (!hasAccess) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to view this snippet")
         }
     }
 

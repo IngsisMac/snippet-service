@@ -1,6 +1,8 @@
 package ingsis.snippet.service.client.fake
 
 import ingsis.snippet.service.client.RunnerClient
+import ingsis.snippet.service.client.dto.LintFindingClientDto
+import ingsis.snippet.service.client.dto.LintSnippetClientResponse
 import ingsis.snippet.service.client.dto.TestSnippetClientResponse
 import ingsis.snippet.service.client.dto.ValidateSnippetResponse
 
@@ -10,6 +12,8 @@ class FakeRunnerClient(
     var defaultTestPassed: Boolean = true,
     var defaultActualOutputs: List<String> = emptyList(),
     var defaultTestErrors: List<String> = emptyList(),
+    var defaultFormattedContent: String? = null,
+    var defaultLintFindings: List<LintFindingClientDto> = emptyList(),
 ) : RunnerClient {
     private val configuredResults = mutableMapOf<String, ValidateSnippetResponse>()
 
@@ -42,5 +46,21 @@ class FakeRunnerClient(
             actualOutputs = if (defaultTestPassed) expectedOutputs else defaultActualOutputs,
             expectedOutputs = expectedOutputs,
             errors = defaultTestErrors,
+        )
+
+    override fun format(
+        content: String,
+        version: String,
+        rules: Map<String, Any>,
+    ): String = defaultFormattedContent ?: content
+
+    override fun lint(
+        content: String,
+        version: String,
+        rules: Map<String, Any>,
+    ): LintSnippetClientResponse =
+        LintSnippetClientResponse(
+            findings = defaultLintFindings,
+            findingsCount = defaultLintFindings.size,
         )
 }

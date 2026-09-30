@@ -447,4 +447,87 @@ class SnippetServiceTest {
         assertNull(snippetStore.get(id))
         verify(snippetRepository).delete(snippet)
     }
+
+    @Test
+    fun shouldFormatSnippetUsingUserRules() {
+        val id = UUID.randomUUID()
+        val ownerId = "auth0|owner"
+        val snippet =
+            Snippet(
+                id = id,
+                name = "To Format",
+                ownerId = ownerId,
+                language = "printscript",
+                version = "1.1",
+                content = "let a=1;",
+            )
+        snippetStore.put(id, "let a=1;")
+        fakePermissionClient.setPermission(id, ownerId, PermissionLevel.OWNER)
+        fakePermissionClient.setFormatRules(ownerId, mapOf("rules" to true))
+        fakeRunnerClient.defaultFormattedContent = "let a = 1;"
+        whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
+
+        val formatted = snippetService.formatSnippet(id, ownerId)
+
+        assertEquals("let a = 1;", formatted)
+    }
+
+    @Test
+    fun shouldLintSnippetAndMarkCompliantWhenNoFindings() {
+        val id = UUID.randomUUID()
+        val ownerId = "auth0|owner"
+        val snippet =
+            Snippet(
+                id = id,
+                name = "Clean Snippet",
+                ownerId = ownerId,
+                language = "printscript",
+                version = "1.1",
+                content = "let a: number = 1;",
+            )
+        val status = SnippetStatus(snippetId = id, status = ComplianceStatus.PENDING)
+        snippetStore.put(id, "let a: number = 1;")
+        fakePermissionClient.setPermission(id, ownerId, PermissionLevel.OWNER)
+        fakeRunnerClient.defaultLintFindings = emptyList()
+        whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
+        whenever(statusRepository.findById(id)).thenReturn(Optional.of(status))
+        whenever(statusRepository.save(any<SnippetStatus>())).thenReturn(status)
+
+        val report = snippetService.lintSnippet(id, ownerId)
+
+        assertEquals(ComplianceStatus.COMPLIANT, report.status)
+        assertEquals(0, report.findingsCount)
+    }
+
+    @Test
+    fun shouldLintSnippetAndMarkNonCompliantWhenFindingsExist() {
+        val id = UUID.randomUUID()
+        val ownerId = "auth0|owner"
+        val snippet =
+            Snippet(
+                id = id,
+                name = "Dirty Snippet",
+                ownerId = ownerId,
+                language = "printscript",
+                version = "1.1",
+                content = "let a: number = 1;",
+            )
+        val status = SnippetStatus(snippetId = id, status = ComplianceStatus.PENDING)
+        snippetStore.put(id, "let a: number = 1;")
+        fakePermissionClient.setPermission(id, ownerId, PermissionLevel.OWNER)
+        fakeRunnerClient.defaultLintFindings =
+            listOf(
+                ingsis.snippet.service.client.dto
+                    .LintFindingClientDto("Style violation", 1, 1)
+            )
+        whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
+        whenever(statusRepository.findById(id)).thenReturn(Optional.of(status))
+        whenever(statusRepository.save(any<SnippetStatus>())).thenReturn(status)
+
+        val report = snippetService.lintSnippet(id, ownerId)
+
+        assertEquals(ComplianceStatus.NOT_COMPLIANT, report.status)
+        assertEquals(1, report.findingsCount)
+        assertEquals("Style violation", report.findings[0].message)
+    }
 }

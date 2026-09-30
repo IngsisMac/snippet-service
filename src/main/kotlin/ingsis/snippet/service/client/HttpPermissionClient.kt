@@ -47,4 +47,24 @@ class HttpPermissionClient(
             PermissionLevel.NONE
         }
     }
+
+    override fun getLintRules(userId: String): Map<String, Any> {
+        val response =
+            restClient
+                .get()
+                .uri("/api/permissions/rules/lint/{userId}", userId)
+                .retrieve()
+                .body(ingsis.snippet.service.client.dto.UserRulesResponse::class.java)
+        return response?.rules ?: emptyMap()
+    }
+
+    override fun getFormatRules(userId: String): Map<String, Any> {
+        val response =
+            restClient
+                .get()
+                .uri("/api/permissions/rules/format/{userId}", userId)
+                .retrieve()
+                .body(ingsis.snippet.service.client.dto.UserRulesResponse::class.java)
+        return response?.rules ?: emptyMap()
+    }
 }

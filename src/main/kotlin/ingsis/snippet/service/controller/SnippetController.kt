@@ -1,6 +1,7 @@
 package ingsis.snippet.service.controller
 
 import ingsis.snippet.service.controller.dto.CreateSnippetRequest
+import ingsis.snippet.service.controller.dto.LintReportResponse
 import ingsis.snippet.service.controller.dto.SnippetResponse
 import ingsis.snippet.service.controller.dto.UpdateSnippetRequest
 import ingsis.snippet.service.service.SnippetService
@@ -84,5 +85,24 @@ class SnippetController(
     ) {
         val ownerId = jwt?.subject ?: "anonymous"
         snippetService.deleteSnippet(id, ownerId)
+    }
+
+    @PostMapping("/{id}/format")
+    fun formatSnippet(
+        @PathVariable id: UUID,
+        @AuthenticationPrincipal jwt: Jwt?,
+    ): Map<String, String> {
+        val userId = jwt?.subject ?: "anonymous"
+        val formatted = snippetService.formatSnippet(id, userId)
+        return mapOf("formattedContent" to formatted)
+    }
+
+    @PostMapping("/{id}/lint")
+    fun lintSnippet(
+        @PathVariable id: UUID,
+        @AuthenticationPrincipal jwt: Jwt?,
+    ): LintReportResponse {
+        val userId = jwt?.subject ?: "anonymous"
+        return snippetService.lintSnippet(id, userId)
     }
 }

@@ -1,5 +1,9 @@
 package ingsis.snippet.service.client
 
+import ingsis.snippet.service.client.dto.FormatSnippetClientRequest
+import ingsis.snippet.service.client.dto.FormatSnippetClientResponse
+import ingsis.snippet.service.client.dto.LintSnippetClientRequest
+import ingsis.snippet.service.client.dto.LintSnippetClientResponse
 import ingsis.snippet.service.client.dto.TestSnippetClientRequest
 import ingsis.snippet.service.client.dto.TestSnippetClientResponse
 import ingsis.snippet.service.client.dto.ValidateSnippetRequest
@@ -51,5 +55,38 @@ class HttpRunnerClient(
                 passed = false,
                 errors = listOf("Empty response from runner"),
             )
+    }
+
+    override fun format(
+        content: String,
+        version: String,
+        rules: Map<String, Any>,
+    ): String {
+        val request = FormatSnippetClientRequest(content = content, version = version, rules = rules)
+        val response =
+            restClient
+                .post()
+                .uri("/runner/format")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(request)
+                .retrieve()
+                .body(FormatSnippetClientResponse::class.java)
+        return response?.formattedContent ?: content
+    }
+
+    override fun lint(
+        content: String,
+        version: String,
+        rules: Map<String, Any>,
+    ): LintSnippetClientResponse {
+        val request = LintSnippetClientRequest(content = content, version = version, rules = rules)
+        return restClient
+            .post()
+            .uri("/runner/lint")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(request)
+            .retrieve()
+            .body(LintSnippetClientResponse::class.java)
+            ?: LintSnippetClientResponse()
     }
 }
