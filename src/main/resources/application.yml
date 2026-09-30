@@ -30,3 +30,10 @@ springdoc:
     path: /v3/api-docs
   swagger-ui:
     path: /swagger-ui.html
+
+services:
+  runner:
+    url: ${RUNNER_SERVICE_URL:http://localhost:8082}
+  permission:
+    url: ${PERMISSION_SERVICE_URL:http://localhost:8081}
+

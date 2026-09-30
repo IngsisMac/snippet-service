@@ -1,5 +1,8 @@
 package ingsis.snippet.service.service
 
+import ingsis.snippet.service.client.PermissionClient
+import ingsis.snippet.service.client.RunnerClient
+import ingsis.snippet.service.client.dto.PermissionLevel
 import ingsis.snippet.service.controller.dto.CreateSnippetRequest
 import ingsis.snippet.service.controller.dto.SnippetResponse
 import ingsis.snippet.service.controller.dto.UpdateSnippetRequest
@@ -21,12 +24,16 @@ import java.util.UUID
 class SnippetService(
     private val snippetRepository: SnippetRepository,
     private val statusRepository: SnippetStatusRepository,
+    private val runnerClient: RunnerClient,
+    private val permissionClient: PermissionClient,
 ) {
     @Transactional
     fun createSnippet(
         ownerId: String,
         request: CreateSnippetRequest,
     ): SnippetResponse {
+        validateSnippetSyntax(request.content, request.version)
+
         val snippet =
             Snippet(
                 name = request.name,
@@ -46,15 +53,27 @@ class SnippetService(
             )
         val savedStatus = statusRepository.save(status)
 
+        permissionClient.assignOwner(savedSnippet.id, ownerId)
+
         return mapToResponse(savedSnippet, savedStatus)
     }
 
     @Transactional(readOnly = true)
-    fun getSnippet(id: UUID): SnippetResponse {
+    fun getSnippet(
+        id: UUID,
+        userId: String = "anonymous",
+    ): SnippetResponse {
         val snippet =
             snippetRepository.findById(id).orElseThrow {
                 ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
             }
+
+        val permission = permissionClient.getPermission(id, userId)
+        val hasAccess = permission != PermissionLevel.NONE || snippet.ownerId == userId
+        if (!hasAccess) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to view this snippet")
+        }
+
         val status =
             statusRepository.findById(id).orElse(
                 SnippetStatus(snippetId = id),
@@ -87,7 +106,11 @@ class SnippetService(
             snippetRepository.findById(id).orElseThrow {
                 ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
             }
-        if (snippet.ownerId != ownerId) {
+
+        val permission = permissionClient.getPermission(id, ownerId)
+        val canEdit =
+            permission == PermissionLevel.OWNER || permission == PermissionLevel.WRITE || snippet.ownerId == ownerId
+        if (!canEdit) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to edit this snippet")
         }
 
@@ -111,10 +134,30 @@ class SnippetService(
             snippetRepository.findById(id).orElseThrow {
                 ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
             }
-        if (snippet.ownerId != ownerId) {
+
+        val permission = permissionClient.getPermission(id, ownerId)
+        val isOwner = permission == PermissionLevel.OWNER || snippet.ownerId == ownerId
+        if (!isOwner) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to delete this snippet")
         }
         snippetRepository.delete(snippet)
+    }
+
+    private fun validateSnippetSyntax(
+        content: String,
+        version: String,
+    ) {
+        if (content.isBlank()) return
+        val validation = runnerClient.validate(content, version)
+        if (!validation.valid) {
+            val errorMsg =
+                if (validation.errors.isNotEmpty()) {
+                    validation.errors.joinToString("; ")
+                } else {
+                    "Invalid snippet syntax"
+                }
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, errorMsg)
+        }
     }
 
     private fun mapToResponse(

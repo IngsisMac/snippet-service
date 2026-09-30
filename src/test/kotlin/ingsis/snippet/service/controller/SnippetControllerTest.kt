@@ -82,7 +82,7 @@ class SnippetControllerTest {
 
     @Test
     fun shouldGetSnippetEndpoint() {
-        whenever(snippetService.getSnippet(sampleSnippet.id)).thenReturn(sampleSnippet)
+        whenever(snippetService.getSnippet(eq(sampleSnippet.id), any())).thenReturn(sampleSnippet)
 
         mockMvc
             .perform(
