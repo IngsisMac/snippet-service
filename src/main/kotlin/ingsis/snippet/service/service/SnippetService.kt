@@ -40,6 +40,7 @@ class SnippetService(
                 ownerId = ownerId,
                 language = request.language,
                 version = request.version,
+                content = request.content,
             )
         val savedSnippet = snippetRepository.save(snippet)
 

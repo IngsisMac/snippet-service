@@ -20,6 +20,8 @@ class Snippet(
     var language: String,
     @Column(nullable = false)
     var version: String,
+    @Column(name = "content", columnDefinition = "TEXT", nullable = false)
+    var content: String = "",
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
     @Column(name = "updated_at", nullable = false)

@@ -9,6 +9,11 @@ import java.util.UUID
 interface TestCaseRepository : JpaRepository<TestCase, UUID> {
     fun findAllBySnippetId(snippetId: UUID): List<TestCase>
 
+    fun findBySnippetIdAndId(
+        snippetId: UUID,
+        id: UUID,
+    ): java.util.Optional<TestCase>
+
     fun deleteBySnippetIdAndId(
         snippetId: UUID,
         id: UUID,

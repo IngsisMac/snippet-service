@@ -10,3 +10,12 @@ data class TestCaseResponse(
     val expectedOutputs: List<String>,
     val env: Map<String, String>?,
 )
+
+data class TestCaseExecutionResponse(
+    val testCaseId: UUID,
+    val name: String,
+    val passed: Boolean,
+    val actualOutputs: List<String>,
+    val expectedOutputs: List<String>,
+    val errors: List<String>,
+)

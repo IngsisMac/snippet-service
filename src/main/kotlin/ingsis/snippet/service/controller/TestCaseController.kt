@@ -1,11 +1,14 @@
 package ingsis.snippet.service.controller
 
 import ingsis.snippet.service.controller.dto.CreateTestCaseRequest
+import ingsis.snippet.service.controller.dto.TestCaseExecutionResponse
 import ingsis.snippet.service.controller.dto.TestCaseResponse
 import ingsis.snippet.service.service.TestCaseService
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -25,22 +28,49 @@ class TestCaseController(
     fun createTestCase(
         @PathVariable snippetId: UUID,
         @Valid @RequestBody request: CreateTestCaseRequest,
+        @AuthenticationPrincipal jwt: Jwt?,
     ): ResponseEntity<TestCaseResponse> {
-        val created = testCaseService.createTestCase(snippetId, request)
+        val userId = jwt?.subject ?: "anonymous"
+        val created = testCaseService.createTestCase(snippetId, userId, request)
         return ResponseEntity.status(HttpStatus.CREATED).body(created)
     }
 
     @GetMapping
     fun listTestCases(
         @PathVariable snippetId: UUID,
-    ): List<TestCaseResponse> = testCaseService.listTestCases(snippetId)
+        @AuthenticationPrincipal jwt: Jwt?,
+    ): List<TestCaseResponse> {
+        val userId = jwt?.subject ?: "anonymous"
+        return testCaseService.listTestCases(snippetId, userId)
+    }
 
     @DeleteMapping("/{testCaseId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun deleteTestCase(
         @PathVariable snippetId: UUID,
         @PathVariable testCaseId: UUID,
+        @AuthenticationPrincipal jwt: Jwt?,
     ) {
-        testCaseService.deleteTestCase(snippetId, testCaseId)
+        val userId = jwt?.subject ?: "anonymous"
+        testCaseService.deleteTestCase(snippetId, testCaseId, userId)
+    }
+
+    @PostMapping("/{testCaseId}/run")
+    fun runTestCase(
+        @PathVariable snippetId: UUID,
+        @PathVariable testCaseId: UUID,
+        @AuthenticationPrincipal jwt: Jwt?,
+    ): TestCaseExecutionResponse {
+        val userId = jwt?.subject ?: "anonymous"
+        return testCaseService.runTestCase(snippetId, testCaseId, userId)
+    }
+
+    @PostMapping("/run-all")
+    fun runAllTestCases(
+        @PathVariable snippetId: UUID,
+        @AuthenticationPrincipal jwt: Jwt?,
+    ): List<TestCaseExecutionResponse> {
+        val userId = jwt?.subject ?: "anonymous"
+        return testCaseService.runAllTestCases(snippetId, userId)
     }
 }

@@ -67,4 +67,31 @@ class HttpRunnerClientTest {
         assertEquals("Unexpected token at line 1", response.errors[0])
         mockServer.verify()
     }
+
+    @Test
+    fun shouldReturnTestExecutionResultWhenRunnerExecutesTestCase() {
+        mockServer
+            .expect(requestTo("http://runner-service:8082/runner/test"))
+            .andExpect(method(HttpMethod.POST))
+            .andExpect(jsonPath("$.content").value("println(1);"))
+            .andExpect(jsonPath("$.expectedOutputs[0]").value("1"))
+            .andRespond(
+                withSuccess(
+                    """{"passed":true,"actualOutputs":["1"],"expectedOutputs":["1"],"errors":[]}""",
+                    MediaType.APPLICATION_JSON,
+                ),
+            )
+
+        val response =
+            runnerClient.runTest(
+                content = "println(1);",
+                version = "1.1",
+                inputs = emptyList(),
+                expectedOutputs = listOf("1"),
+            )
+
+        assertTrue(response.passed)
+        assertEquals(listOf("1"), response.actualOutputs)
+        mockServer.verify()
+    }
 }

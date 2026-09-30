@@ -1,11 +1,15 @@
 package ingsis.snippet.service.client.fake
 
 import ingsis.snippet.service.client.RunnerClient
+import ingsis.snippet.service.client.dto.TestSnippetClientResponse
 import ingsis.snippet.service.client.dto.ValidateSnippetResponse
 
 class FakeRunnerClient(
     var defaultValid: Boolean = true,
     var defaultErrors: List<String> = emptyList(),
+    var defaultTestPassed: Boolean = true,
+    var defaultActualOutputs: List<String> = emptyList(),
+    var defaultTestErrors: List<String> = emptyList(),
 ) : RunnerClient {
     private val configuredResults = mutableMapOf<String, ValidateSnippetResponse>()
 
@@ -24,5 +28,19 @@ class FakeRunnerClient(
         configuredResults[content] ?: ValidateSnippetResponse(
             valid = defaultValid,
             errors = defaultErrors,
+        )
+
+    override fun runTest(
+        content: String,
+        version: String,
+        inputs: List<String>,
+        expectedOutputs: List<String>,
+        env: Map<String, String>?,
+    ): TestSnippetClientResponse =
+        TestSnippetClientResponse(
+            passed = defaultTestPassed,
+            actualOutputs = if (defaultTestPassed) expectedOutputs else defaultActualOutputs,
+            expectedOutputs = expectedOutputs,
+            errors = defaultTestErrors,
         )
 }

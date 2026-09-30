@@ -3,6 +3,7 @@ package ingsis.snippet.service.controller
 import com.fasterxml.jackson.databind.ObjectMapper
 import ingsis.snippet.service.config.SecurityConfig
 import ingsis.snippet.service.controller.dto.CreateTestCaseRequest
+import ingsis.snippet.service.controller.dto.TestCaseExecutionResponse
 import ingsis.snippet.service.controller.dto.TestCaseResponse
 import ingsis.snippet.service.service.TestCaseService
 import org.junit.jupiter.api.BeforeEach
@@ -61,12 +62,12 @@ class TestCaseControllerTest {
                 expectedOutputs = listOf("2"),
             )
 
-        whenever(testCaseService.createTestCase(eq(snippetId), any())).thenReturn(sampleTestCase)
+        whenever(testCaseService.createTestCase(eq(snippetId), any(), any())).thenReturn(sampleTestCase)
 
         mockMvc
             .perform(
                 post("/api/snippets/{snippetId}/test-cases", snippetId)
-                    .with(jwt())
+                    .with(jwt().jwt { it.subject("auth0|owner") })
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(request)),
             ).andExpect(status().isCreated)
@@ -76,12 +77,12 @@ class TestCaseControllerTest {
 
     @Test
     fun shouldListTestCasesEndpoint() {
-        whenever(testCaseService.listTestCases(snippetId)).thenReturn(listOf(sampleTestCase))
+        whenever(testCaseService.listTestCases(eq(snippetId), any())).thenReturn(listOf(sampleTestCase))
 
         mockMvc
             .perform(
                 get("/api/snippets/{snippetId}/test-cases", snippetId)
-                    .with(jwt()),
+                    .with(jwt().jwt { it.subject("auth0|owner") }),
             ).andExpect(status().isOk)
             .andExpect(jsonPath("$[0].name").value("Basic test"))
     }
@@ -91,7 +92,54 @@ class TestCaseControllerTest {
         mockMvc
             .perform(
                 delete("/api/snippets/{snippetId}/test-cases/{id}", snippetId, sampleTestCase.id)
-                    .with(jwt()),
+                    .with(jwt().jwt { it.subject("auth0|owner") }),
             ).andExpect(status().isNoContent)
+    }
+
+    @Test
+    fun shouldRunSingleTestCaseEndpoint() {
+        val executionResponse =
+            TestCaseExecutionResponse(
+                testCaseId = sampleTestCase.id,
+                name = "Basic test",
+                passed = true,
+                actualOutputs = listOf("2"),
+                expectedOutputs = listOf("2"),
+                errors = emptyList(),
+            )
+
+        whenever(testCaseService.runTestCase(eq(snippetId), eq(sampleTestCase.id), any()))
+            .thenReturn(executionResponse)
+
+        mockMvc
+            .perform(
+                post("/api/snippets/{snippetId}/test-cases/{id}/run", snippetId, sampleTestCase.id)
+                    .with(jwt().jwt { it.subject("auth0|reader") }),
+            ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.passed").value(true))
+            .andExpect(jsonPath("$.testCaseId").value(sampleTestCase.id.toString()))
+    }
+
+    @Test
+    fun shouldRunAllTestCasesEndpoint() {
+        val executionResponse =
+            TestCaseExecutionResponse(
+                testCaseId = sampleTestCase.id,
+                name = "Basic test",
+                passed = true,
+                actualOutputs = listOf("2"),
+                expectedOutputs = listOf("2"),
+                errors = emptyList(),
+            )
+
+        whenever(testCaseService.runAllTestCases(eq(snippetId), any()))
+            .thenReturn(listOf(executionResponse))
+
+        mockMvc
+            .perform(
+                post("/api/snippets/{snippetId}/test-cases/run-all", snippetId)
+                    .with(jwt().jwt { it.subject("auth0|reader") }),
+            ).andExpect(status().isOk)
+            .andExpect(jsonPath("$[0].passed").value(true))
     }
 }
