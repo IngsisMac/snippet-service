@@ -29,6 +29,7 @@ class SnippetService(
     private val runnerClient: RunnerClient,
     private val permissionClient: PermissionClient,
     private val snippetStore: SnippetStore,
+    private val snippetTestRunner: SnippetTestRunner? = null,
 ) {
     @Transactional
     fun createSnippet(
@@ -256,6 +257,7 @@ class SnippetService(
             )
         status.status = ComplianceStatus.PENDING
         statusRepository.save(status)
+        snippetTestRunner?.runTestsQuietly(snippet.id, newContent, snippet.version)
     }
 
     private fun validateSnippetSyntax(

@@ -35,15 +35,25 @@ class SnippetServiceTest {
     private lateinit var fakeRunnerClient: FakeRunnerClient
     private lateinit var fakePermissionClient: FakePermissionClient
     private lateinit var snippetStore: InMemorySnippetStore
+    private lateinit var testCaseRepository: ingsis.snippet.service.domain.repository.TestCaseRepository
+    private lateinit var snippetTestRunner: SnippetTestRunner
     private lateinit var snippetService: SnippetService
 
     @BeforeEach
     fun setUp() {
         snippetRepository = mock()
         statusRepository = mock()
+        testCaseRepository = mock()
         fakeRunnerClient = FakeRunnerClient()
         fakePermissionClient = FakePermissionClient()
         snippetStore = InMemorySnippetStore()
+        snippetTestRunner =
+            SnippetTestRunner(
+                testCaseRepository,
+                fakeRunnerClient,
+                com.fasterxml.jackson.databind
+                    .ObjectMapper()
+            )
         snippetService =
             SnippetService(
                 snippetRepository = snippetRepository,
@@ -51,6 +61,7 @@ class SnippetServiceTest {
                 runnerClient = fakeRunnerClient,
                 permissionClient = fakePermissionClient,
                 snippetStore = snippetStore,
+                snippetTestRunner = snippetTestRunner,
             )
     }
 
@@ -529,5 +540,43 @@ class SnippetServiceTest {
         assertEquals(ComplianceStatus.NOT_COMPLIANT, report.status)
         assertEquals(1, report.findingsCount)
         assertEquals("Style violation", report.findings[0].message)
+    }
+
+    @Test
+    fun shouldTriggerAutomaticTestRunWhenContentIsUpdated() {
+        val id = UUID.randomUUID()
+        val ownerId = "auth0|owner"
+        val snippet =
+            Snippet(
+                id = id,
+                name = "Test Snippet",
+                ownerId = ownerId,
+                language = "printscript",
+                version = "1.1",
+                content = "let a: number = 1;",
+            )
+        val status = SnippetStatus(snippetId = id, status = ComplianceStatus.COMPLIANT)
+        val testCase =
+            ingsis.snippet.service.domain.model.TestCase(
+                snippetId = id,
+                name = "Case 1",
+                inputs = "[]",
+                expectedOutputs = "[\"2\"]",
+            )
+
+        fakePermissionClient.setPermission(id, ownerId, PermissionLevel.OWNER)
+        whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
+        whenever(snippetRepository.save(any<Snippet>())).thenReturn(snippet)
+        whenever(statusRepository.findById(id)).thenReturn(Optional.of(status))
+        whenever(statusRepository.save(any<SnippetStatus>())).thenReturn(status)
+        whenever(testCaseRepository.findAllBySnippetId(id)).thenReturn(listOf(testCase))
+
+        fakeRunnerClient.defaultTestPassed = false
+        fakeRunnerClient.defaultTestErrors = listOf("Failing test")
+
+        val updated = snippetService.updateSnippet(id, ownerId, UpdateSnippetRequest(content = "let a: number = 2;"))
+
+        assertEquals("let a: number = 2;", updated.content)
+        verify(snippetRepository).save(snippet)
     }
 }
