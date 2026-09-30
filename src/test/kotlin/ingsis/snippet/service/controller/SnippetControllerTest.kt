@@ -148,4 +148,57 @@ class SnippetControllerTest {
             .andExpect(jsonPath("$.status").value("COMPLIANT"))
             .andExpect(jsonPath("$.findingsCount").value(0))
     }
+
+    @Test
+    fun shouldListSnippetsWithDefaultParamsEndpoint() {
+        val page =
+            org.springframework.data.domain
+                .PageImpl(listOf(sampleSnippet))
+        whenever(
+            snippetService.listSnippets(
+                userId = eq("auth0|123"),
+                scope = eq(ingsis.snippet.service.domain.model.SnippetScope.ALL),
+                name = eq(null),
+                language = eq(null),
+                status = eq(null),
+                pageable = any(),
+            ),
+        ).thenReturn(page)
+
+        mockMvc
+            .perform(
+                get("/api/snippets")
+                    .with(jwt().jwt { it.subject("auth0|123") }),
+            ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.content[0].id").value(sampleSnippet.id.toString()))
+            .andExpect(jsonPath("$.content[0].name").value("Sample"))
+    }
+
+    @Test
+    fun shouldListSnippetsWithCustomFiltersEndpoint() {
+        val page =
+            org.springframework.data.domain
+                .PageImpl(listOf(sampleSnippet))
+        whenever(
+            snippetService.listSnippets(
+                userId = eq("auth0|123"),
+                scope = eq(ingsis.snippet.service.domain.model.SnippetScope.OWNED),
+                name = eq("Sample"),
+                language = eq("printscript"),
+                status = eq(ComplianceStatus.COMPLIANT),
+                pageable = any(),
+            ),
+        ).thenReturn(page)
+
+        mockMvc
+            .perform(
+                get("/api/snippets")
+                    .param("scope", "OWNED")
+                    .param("name", "Sample")
+                    .param("language", "printscript")
+                    .param("status", "COMPLIANT")
+                    .with(jwt().jwt { it.subject("auth0|123") }),
+            ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.content[0].name").value("Sample"))
+    }
 }

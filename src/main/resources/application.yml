@@ -36,4 +36,11 @@ services:
     url: ${RUNNER_SERVICE_URL:http://localhost:8082}
   permission:
     url: ${PERMISSION_SERVICE_URL:http://localhost:8081}
+  asset:
+    url: ${ASSET_SERVICE_URL:http://localhost:8083}
+
+snippet:
+  store:
+    type: ${SNIPPET_STORE_TYPE:asset-service}
+
 

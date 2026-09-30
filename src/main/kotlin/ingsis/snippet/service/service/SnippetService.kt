@@ -9,11 +9,13 @@ import ingsis.snippet.service.controller.dto.SnippetResponse
 import ingsis.snippet.service.controller.dto.UpdateSnippetRequest
 import ingsis.snippet.service.domain.model.ComplianceStatus
 import ingsis.snippet.service.domain.model.Snippet
+import ingsis.snippet.service.domain.model.SnippetScope
 import ingsis.snippet.service.domain.model.SnippetStatus
 import ingsis.snippet.service.domain.repository.SnippetRepository
 import ingsis.snippet.service.domain.repository.SnippetStatusRepository
 import ingsis.snippet.service.store.SnippetStore
 import org.springframework.data.domain.Page
+import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -161,17 +163,81 @@ class SnippetService(
     fun listSnippets(
         ownerId: String,
         pageable: Pageable,
+    ): Page<SnippetResponse> = listSnippets(userId = ownerId, scope = SnippetScope.ALL, pageable = pageable)
+
+    @Transactional(readOnly = true)
+    @Suppress("LongParameterList")
+    fun listSnippets(
+        userId: String,
+        scope: SnippetScope = SnippetScope.ALL,
+        name: String? = null,
+        language: String? = null,
+        status: ComplianceStatus? = null,
+        pageable: Pageable,
     ): Page<SnippetResponse> {
-        val page = snippetRepository.findAllByOwnerId(ownerId, pageable)
+        val page = fetchSnippetsPage(userId, scope, name, language, status, pageable)
+        return enrichSnippetResponses(page)
+    }
+
+    @Suppress("LongParameterList")
+    private fun fetchSnippetsPage(
+        userId: String,
+        scope: SnippetScope,
+        name: String?,
+        language: String?,
+        status: ComplianceStatus?,
+        pageable: Pageable,
+    ): Page<Snippet> =
+        when (scope) {
+            SnippetScope.OWNED -> {
+                snippetRepository.findAllByOwnerAndFilters(userId, name, language, status, pageable)
+            }
+
+            SnippetScope.SHARED -> {
+                val sharedIds = getSharedSnippetIds(userId)
+                if (sharedIds.isEmpty()) {
+                    PageImpl(emptyList(), pageable, 0)
+                } else {
+                    snippetRepository.findAllByIdsAndFilters(sharedIds, name, language, status, pageable)
+                }
+            }
+
+            SnippetScope.ALL -> {
+                val sharedIds = getSharedSnippetIds(userId)
+                if (sharedIds.isEmpty()) {
+                    snippetRepository.findAllByOwnerAndFilters(userId, name, language, status, pageable)
+                } else {
+                    snippetRepository.findAllByOwnerOrIdsAndFilters(userId, sharedIds, name, language, status, pageable)
+                }
+            }
+        }
+
+    private fun enrichSnippetResponses(page: Page<Snippet>): Page<SnippetResponse> {
+        val snippetIds = page.content.map { it.id }
+        val statusMap =
+            if (snippetIds.isEmpty()) {
+                emptyMap()
+            } else {
+                statusRepository.findAllById(snippetIds).associateBy { it.snippetId }
+            }
+
         return page.map { snippet ->
-            val status =
-                statusRepository.findById(snippet.id).orElse(
-                    SnippetStatus(snippetId = snippet.id),
-                )
+            val snippetStatus = statusMap[snippet.id] ?: SnippetStatus(snippetId = snippet.id)
             val content = snippetStore.get(snippet.id) ?: snippet.content
-            mapToResponse(snippet, status, content)
+            mapToResponse(snippet, snippetStatus, content)
         }
     }
+
+    private fun getSharedSnippetIds(userId: String): Set<UUID> =
+        try {
+            permissionClient
+                .getUserPermissions(userId)
+                .filter { it.level != PermissionLevel.NONE && it.level != PermissionLevel.OWNER }
+                .map { it.snippetId }
+                .toSet()
+        } catch (_: Exception) {
+            emptySet()
+        }
 
     @Transactional
     fun updateSnippet(

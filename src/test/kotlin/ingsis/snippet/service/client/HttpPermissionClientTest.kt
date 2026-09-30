@@ -121,4 +121,48 @@ class HttpPermissionClientTest {
         assertEquals(true, rules["printscript.space-before-colon"])
         mockServer.verify()
     }
+
+    @Test
+    fun shouldGetUserPermissionsSuccessfully() {
+        val userId = "auth0|user1"
+        val snippetId = UUID.randomUUID()
+        mockServer
+            .expect(requestTo("http://permission-service:8081/api/permissions/user/auth0%7Cuser1"))
+            .andExpect(method(HttpMethod.GET))
+            .andRespond(
+                withSuccess(
+                    """[{"snippetId":"$snippetId","userId":"auth0|user1","level":"READ","grantedAt":"2026-09-30T10:00:00Z"}]""",
+                    MediaType.APPLICATION_JSON,
+                ),
+            )
+
+        val permissions = permissionClient.getUserPermissions(userId)
+
+        assertEquals(1, permissions.size)
+        assertEquals(snippetId, permissions[0].snippetId)
+        assertEquals(PermissionLevel.READ, permissions[0].level)
+        mockServer.verify()
+    }
+
+    @Test
+    fun shouldGetUserPermissionsFilteredByLevelSuccessfully() {
+        val userId = "auth0|user1"
+        val snippetId = UUID.randomUUID()
+        mockServer
+            .expect(requestTo("http://permission-service:8081/api/permissions/user/auth0%7Cuser1?level=WRITE"))
+            .andExpect(method(HttpMethod.GET))
+            .andRespond(
+                withSuccess(
+                    """[{"snippetId":"$snippetId","userId":"auth0|user1","level":"WRITE","grantedAt":"2026-09-30T10:00:00Z"}]""",
+                    MediaType.APPLICATION_JSON,
+                ),
+            )
+
+        val permissions = permissionClient.getUserPermissions(userId, PermissionLevel.WRITE)
+
+        assertEquals(1, permissions.size)
+        assertEquals(snippetId, permissions[0].snippetId)
+        assertEquals(PermissionLevel.WRITE, permissions[0].level)
+        mockServer.verify()
+    }
 }

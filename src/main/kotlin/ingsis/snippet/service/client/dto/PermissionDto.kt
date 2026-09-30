@@ -27,3 +27,10 @@ data class UserRulesResponse(
     val rulesVersion: Int = 1,
     val rules: Map<String, Any> = emptyMap(),
 )
+
+data class UserPermissionResponse(
+    val snippetId: UUID,
+    val userId: String,
+    val level: PermissionLevel,
+    val grantedAt: Instant? = null,
+)

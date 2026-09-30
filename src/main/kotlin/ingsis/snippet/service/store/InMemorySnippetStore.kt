@@ -1,10 +1,8 @@
 package ingsis.snippet.service.store
 
-import org.springframework.stereotype.Component
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-@Component
 class InMemorySnippetStore : SnippetStore {
     private val storage = ConcurrentHashMap<UUID, String>()
 

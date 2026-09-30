@@ -1,6 +1,7 @@
 package ingsis.snippet.service.client
 
 import ingsis.snippet.service.client.dto.PermissionLevel
+import ingsis.snippet.service.client.dto.UserPermissionResponse
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.web.client.RestClient
 import java.util.UUID
@@ -66,5 +67,22 @@ class HttpPermissionClient(
                 .retrieve()
                 .body(ingsis.snippet.service.client.dto.UserRulesResponse::class.java)
         return response?.rules ?: emptyMap()
+    }
+
+    override fun getUserPermissions(
+        userId: String,
+        level: PermissionLevel?,
+    ): List<UserPermissionResponse> {
+        val responseType = object : ParameterizedTypeReference<List<UserPermissionResponse>>() {}
+        val response =
+            restClient
+                .get()
+                .uri { builder ->
+                    builder.path("/api/permissions/user/{userId}")
+                    level?.let { builder.queryParam("level", it.name) }
+                    builder.build(userId)
+                }.retrieve()
+                .body(responseType)
+        return response ?: emptyList()
     }
 }

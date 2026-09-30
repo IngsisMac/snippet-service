@@ -1,6 +1,7 @@
 package ingsis.snippet.service.client
 
 import ingsis.snippet.service.client.dto.PermissionLevel
+import ingsis.snippet.service.client.dto.UserPermissionResponse
 import java.util.UUID
 
 interface PermissionClient {
@@ -17,4 +18,9 @@ interface PermissionClient {
     fun getLintRules(userId: String): Map<String, Any>
 
     fun getFormatRules(userId: String): Map<String, Any>
+
+    fun getUserPermissions(
+        userId: String,
+        level: PermissionLevel? = null,
+    ): List<UserPermissionResponse>
 }

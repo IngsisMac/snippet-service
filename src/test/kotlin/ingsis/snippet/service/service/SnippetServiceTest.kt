@@ -22,8 +22,6 @@ import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
-import org.springframework.data.domain.PageImpl
-import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.web.server.ResponseStatusException
 import java.util.Optional
@@ -211,28 +209,6 @@ class SnippetServiceTest {
         assertThrows<ResponseStatusException> {
             snippetService.getSnippet(id, "auth0|user123")
         }
-    }
-
-    @Test
-    fun shouldListSnippetsByOwner() {
-        val ownerId = "auth0|user123"
-        val pageable = PageRequest.of(0, 10)
-        val snippet =
-            Snippet(
-                name = "Snippet 1",
-                ownerId = ownerId,
-                language = "printscript",
-                version = "1.0",
-            )
-        val page = PageImpl(listOf(snippet))
-
-        whenever(snippetRepository.findAllByOwnerId(ownerId, pageable)).thenReturn(page)
-        whenever(statusRepository.findById(snippet.id)).thenReturn(Optional.of(SnippetStatus(snippetId = snippet.id)))
-
-        val result = snippetService.listSnippets(ownerId, pageable)
-
-        assertEquals(1, result.totalElements)
-        assertEquals("Snippet 1", result.content[0].name)
     }
 
     @Test

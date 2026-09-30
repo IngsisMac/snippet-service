@@ -2,6 +2,7 @@ package ingsis.snippet.service.client.fake
 
 import ingsis.snippet.service.client.PermissionClient
 import ingsis.snippet.service.client.dto.PermissionLevel
+import ingsis.snippet.service.client.dto.UserPermissionResponse
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -50,6 +51,28 @@ class FakePermissionClient : PermissionClient {
     override fun getLintRules(userId: String): Map<String, Any> = lintRules[userId] ?: emptyMap()
 
     override fun getFormatRules(userId: String): Map<String, Any> = formatRules[userId] ?: emptyMap()
+
+    override fun getUserPermissions(
+        userId: String,
+        level: PermissionLevel?,
+    ): List<UserPermissionResponse> {
+        val result = mutableListOf<UserPermissionResponse>()
+        permissions.forEach { (snippetId, userMap) ->
+            val userLevel = userMap[userId]
+            if (userLevel != null && userLevel != PermissionLevel.NONE) {
+                if (level == null || userLevel == level) {
+                    result.add(
+                        UserPermissionResponse(
+                            snippetId = snippetId,
+                            userId = userId,
+                            level = userLevel,
+                        ),
+                    )
+                }
+            }
+        }
+        return result
+    }
 
     fun clear() {
         permissions.clear()

@@ -4,6 +4,8 @@ import ingsis.snippet.service.controller.dto.CreateSnippetRequest
 import ingsis.snippet.service.controller.dto.LintReportResponse
 import ingsis.snippet.service.controller.dto.SnippetResponse
 import ingsis.snippet.service.controller.dto.UpdateSnippetRequest
+import ingsis.snippet.service.domain.model.ComplianceStatus
+import ingsis.snippet.service.domain.model.SnippetScope
 import ingsis.snippet.service.service.SnippetService
 import jakarta.validation.Valid
 import org.springframework.data.domain.Page
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
@@ -59,12 +62,26 @@ class SnippetController(
     }
 
     @GetMapping
+    @Suppress("LongParameterList")
     fun listSnippets(
         @AuthenticationPrincipal jwt: Jwt?,
+        @RequestParam(required = false, defaultValue = "ALL") scope: SnippetScope,
+        @RequestParam(required = false) name: String?,
+        @RequestParam(required = false) snippetName: String?,
+        @RequestParam(required = false) language: String?,
+        @RequestParam(required = false) status: ComplianceStatus?,
         @PageableDefault(size = 20) pageable: Pageable,
     ): Page<SnippetResponse> {
-        val ownerId = jwt?.subject ?: "anonymous"
-        return snippetService.listSnippets(ownerId, pageable)
+        val userId = jwt?.subject ?: "anonymous"
+        val queryName = (name ?: snippetName)?.trim()?.takeIf { it.isNotEmpty() }
+        return snippetService.listSnippets(
+            userId = userId,
+            scope = scope,
+            name = queryName,
+            language = language?.trim()?.takeIf { it.isNotEmpty() },
+            status = status,
+            pageable = pageable,
+        )
     }
 
     @PutMapping("/{id}")

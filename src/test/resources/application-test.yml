@@ -15,3 +15,8 @@ spring:
       resourceserver:
         jwt:
           jwk-set-uri: https://dummy.auth0.com/.well-known/jwks.json
+
+snippet:
+  store:
+    type: memory
+
