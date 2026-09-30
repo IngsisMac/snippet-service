@@ -10,8 +10,10 @@ import ingsis.snippet.service.domain.model.Snippet
 import ingsis.snippet.service.domain.model.SnippetStatus
 import ingsis.snippet.service.domain.repository.SnippetRepository
 import ingsis.snippet.service.domain.repository.SnippetStatusRepository
+import ingsis.snippet.service.store.InMemorySnippetStore
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -32,6 +34,7 @@ class SnippetServiceTest {
     private lateinit var statusRepository: SnippetStatusRepository
     private lateinit var fakeRunnerClient: FakeRunnerClient
     private lateinit var fakePermissionClient: FakePermissionClient
+    private lateinit var snippetStore: InMemorySnippetStore
     private lateinit var snippetService: SnippetService
 
     @BeforeEach
@@ -40,12 +43,14 @@ class SnippetServiceTest {
         statusRepository = mock()
         fakeRunnerClient = FakeRunnerClient()
         fakePermissionClient = FakePermissionClient()
+        snippetStore = InMemorySnippetStore()
         snippetService =
             SnippetService(
                 snippetRepository = snippetRepository,
                 statusRepository = statusRepository,
                 runnerClient = fakeRunnerClient,
                 permissionClient = fakePermissionClient,
+                snippetStore = snippetStore,
             )
     }
 
@@ -338,5 +343,108 @@ class SnippetServiceTest {
 
         assertEquals(HttpStatus.FORBIDDEN, exception.statusCode)
         verify(snippetRepository, never()).delete(snippet)
+    }
+
+    @Test
+    fun shouldRevalidateSyntaxAndPersistNewContentOnUpdate() {
+        val id = UUID.randomUUID()
+        val ownerId = "auth0|owner"
+        val snippet =
+            Snippet(
+                id = id,
+                name = "Original",
+                ownerId = ownerId,
+                language = "printscript",
+                version = "1.1",
+                content = "let x: number = 1;",
+            )
+        val request = UpdateSnippetRequest(content = "let x: number = 2;")
+        val status = SnippetStatus(snippetId = id, status = ComplianceStatus.COMPLIANT)
+
+        fakePermissionClient.setPermission(id, ownerId, PermissionLevel.OWNER)
+        whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
+        whenever(snippetRepository.save(any<Snippet>())).thenReturn(snippet)
+        whenever(statusRepository.findById(id)).thenReturn(Optional.of(status))
+        whenever(statusRepository.save(any<SnippetStatus>())).thenReturn(status)
+
+        val updated = snippetService.updateSnippet(id, ownerId, request)
+
+        assertEquals("let x: number = 2;", updated.content)
+        assertEquals("let x: number = 2;", snippetStore.get(id))
+        assertEquals(ComplianceStatus.PENDING, status.status)
+        verify(snippetRepository).save(snippet)
+    }
+
+    @Test
+    fun shouldThrowBadRequestWhenUpdatingWithInvalidContentSyntax() {
+        val id = UUID.randomUUID()
+        val ownerId = "auth0|owner"
+        val snippet =
+            Snippet(
+                id = id,
+                name = "Original",
+                ownerId = ownerId,
+                language = "printscript",
+                version = "1.1",
+                content = "let x: number = 1;",
+            )
+        val request = UpdateSnippetRequest(content = "invalid syntax code")
+
+        fakePermissionClient.setPermission(id, ownerId, PermissionLevel.OWNER)
+        fakeRunnerClient.setValidationResult("invalid syntax code", false, listOf("Syntax error at line 1"))
+        whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
+
+        val exception =
+            assertThrows<ResponseStatusException> {
+                snippetService.updateSnippet(id, ownerId, request)
+            }
+
+        assertEquals(HttpStatus.BAD_REQUEST, exception.statusCode)
+    }
+
+    @Test
+    fun shouldGetSnippetContentFromStore() {
+        val id = UUID.randomUUID()
+        val ownerId = "auth0|owner"
+        val snippet =
+            Snippet(
+                id = id,
+                name = "Original",
+                ownerId = ownerId,
+                language = "printscript",
+                version = "1.1",
+                content = "initial content",
+            )
+        snippetStore.put(id, "stored blob content")
+
+        fakePermissionClient.setPermission(id, ownerId, PermissionLevel.OWNER)
+        whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
+
+        val content = snippetService.getSnippetContent(id, ownerId)
+
+        assertEquals("stored blob content", content)
+    }
+
+    @Test
+    fun shouldDeleteSnippetFromStoreWhenDeleted() {
+        val id = UUID.randomUUID()
+        val ownerId = "auth0|owner"
+        val snippet =
+            Snippet(
+                id = id,
+                name = "To Delete",
+                ownerId = ownerId,
+                language = "printscript",
+                version = "1.1",
+            )
+        snippetStore.put(id, "content to delete")
+
+        fakePermissionClient.setPermission(id, ownerId, PermissionLevel.OWNER)
+        whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
+
+        snippetService.deleteSnippet(id, ownerId)
+
+        assertNull(snippetStore.get(id))
+        verify(snippetRepository).delete(snippet)
     }
 }

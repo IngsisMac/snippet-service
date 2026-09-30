@@ -47,6 +47,16 @@ class SnippetController(
         return snippetService.getSnippet(id, userId)
     }
 
+    @GetMapping("/{id}/content")
+    fun getSnippetContent(
+        @PathVariable id: UUID,
+        @AuthenticationPrincipal jwt: Jwt?,
+    ): Map<String, String> {
+        val userId = jwt?.subject ?: "anonymous"
+        val content = snippetService.getSnippetContent(id, userId)
+        return mapOf("content" to content)
+    }
+
     @GetMapping
     fun listSnippets(
         @AuthenticationPrincipal jwt: Jwt?,

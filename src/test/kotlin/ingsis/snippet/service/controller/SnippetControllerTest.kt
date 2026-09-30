@@ -101,4 +101,17 @@ class SnippetControllerTest {
                     .with(jwt().jwt { it.subject("auth0|123") }),
             ).andExpect(status().isNoContent)
     }
+
+    @Test
+    fun shouldGetSnippetContentEndpoint() {
+        whenever(snippetService.getSnippetContent(eq(sampleSnippet.id), any()))
+            .thenReturn("println(\"hello\");")
+
+        mockMvc
+            .perform(
+                get("/api/snippets/{id}/content", sampleSnippet.id)
+                    .with(jwt()),
+            ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.content").value("println(\"hello\");"))
+    }
 }
