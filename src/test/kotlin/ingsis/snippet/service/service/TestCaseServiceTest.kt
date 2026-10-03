@@ -9,6 +9,7 @@ import ingsis.snippet.service.domain.model.Snippet
 import ingsis.snippet.service.domain.model.TestCase
 import ingsis.snippet.service.domain.repository.SnippetRepository
 import ingsis.snippet.service.domain.repository.TestCaseRepository
+import ingsis.snippet.service.store.InMemorySnippetStore
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -29,6 +30,7 @@ class TestCaseServiceTest {
     private lateinit var snippetRepository: SnippetRepository
     private lateinit var permissionClient: FakePermissionClient
     private lateinit var runnerClient: FakeRunnerClient
+    private lateinit var snippetStore: InMemorySnippetStore
     private lateinit var objectMapper: ObjectMapper
     private lateinit var testCaseService: TestCaseService
 
@@ -43,7 +45,6 @@ class TestCaseServiceTest {
             ownerId = ownerId,
             language = "printscript",
             version = "1.1",
-            content = "println(10);",
         )
 
     @BeforeEach
@@ -52,6 +53,8 @@ class TestCaseServiceTest {
         snippetRepository = mock()
         permissionClient = FakePermissionClient()
         runnerClient = FakeRunnerClient()
+        snippetStore = InMemorySnippetStore()
+        snippetStore.put(snippetId, "println(10);")
         objectMapper = ObjectMapper()
         testCaseService =
             TestCaseService(
@@ -59,6 +62,7 @@ class TestCaseServiceTest {
                 snippetRepository = snippetRepository,
                 permissionClient = permissionClient,
                 runnerClient = runnerClient,
+                snippetStore = snippetStore,
                 objectMapper = objectMapper,
             )
 
@@ -141,6 +145,43 @@ class TestCaseServiceTest {
     fun shouldThrowForbiddenWhenListingTestCasesWithoutPermission() {
         assertThrows<ResponseStatusException> {
             testCaseService.listTestCases(snippetId, strangerId)
+        }
+    }
+
+    @Test
+    fun shouldUpdateTestCaseKeepingItsIdWhenUserCanWrite() {
+        permissionClient.setPermission(snippetId, ownerId, PermissionLevel.OWNER)
+        val existing = TestCase(snippetId = snippetId, name = "Old", inputs = "[\"1\"]", expectedOutputs = "[\"2\"]")
+        whenever(testCaseRepository.findBySnippetIdAndId(snippetId, existing.id)).thenReturn(Optional.of(existing))
+        whenever(testCaseRepository.save(any<TestCase>())).thenAnswer { it.arguments[0] }
+        val request = CreateTestCaseRequest(name = "New", inputs = listOf("3"), expectedOutputs = listOf("4", "5"))
+
+        val updated = testCaseService.updateTestCase(snippetId, existing.id, ownerId, request)
+
+        assertEquals(existing.id, updated.id)
+        assertEquals("New", updated.name)
+        assertEquals(listOf("3"), updated.inputs)
+        assertEquals(listOf("4", "5"), updated.expectedOutputs)
+    }
+
+    @Test
+    fun shouldThrowForbiddenWhenUpdatingTestCaseWithOnlyReadPermission() {
+        permissionClient.setPermission(snippetId, readerId, PermissionLevel.READ)
+        val request = CreateTestCaseRequest(name = "New")
+
+        assertThrows<ResponseStatusException> {
+            testCaseService.updateTestCase(snippetId, UUID.randomUUID(), readerId, request)
+        }
+    }
+
+    @Test
+    fun shouldThrowNotFoundWhenUpdatingMissingTestCase() {
+        permissionClient.setPermission(snippetId, ownerId, PermissionLevel.OWNER)
+        val missingId = UUID.randomUUID()
+        whenever(testCaseRepository.findBySnippetIdAndId(snippetId, missingId)).thenReturn(Optional.empty())
+
+        assertThrows<ResponseStatusException> {
+            testCaseService.updateTestCase(snippetId, missingId, ownerId, CreateTestCaseRequest(name = "x"))
         }
     }
 

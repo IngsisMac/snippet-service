@@ -20,15 +20,18 @@ import org.springframework.data.domain.Pageable
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.web.client.RestClientException
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 import java.util.UUID
 
 /**
- * Toda decisión de acceso (ver, editar, borrar) se resuelve contra `permission-service` vía
- * [PermissionClient]. La columna `owner_id` de `snippets` registra quién lo creó y sirve
- * para el listado por autor, pero nunca otorga permisos por sí misma: así una
- * transferencia de ownership hecha en permisos tiene efecto inmediato acá.
+ * Toda decisión de acceso (ver, editar, borrar, listar) se resuelve contra `permission-service`
+ * vía [PermissionClient]. La columna `owner_id` de `snippets` registra quién lo creó y nunca
+ * otorga permisos por sí misma: así una transferencia de ownership hecha en permisos tiene
+ * efecto inmediato acá, incluso en el listado de "mis snippets".
+ *
+ * El contenido vive solo en el asset-service detrás de [SnippetStore]; Postgres guarda metadata.
  */
 @Service
 class SnippetService(
@@ -52,7 +55,6 @@ class SnippetService(
                 ownerId = ownerId,
                 language = request.language,
                 version = request.version,
-                content = request.content,
             )
         val savedSnippet = snippetRepository.save(snippet)
         snippetStore.put(savedSnippet.id, request.content)
@@ -75,67 +77,45 @@ class SnippetService(
     @Transactional(readOnly = true)
     fun getSnippet(
         id: UUID,
-        userId: String = "anonymous",
+        userId: String,
     ): SnippetResponse {
-        val snippet =
-            snippetRepository.findById(id).orElseThrow {
-                ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
-            }
-
+        val snippet = findSnippet(id)
         assertCanView(snippet, userId)
-
-        val status =
-            statusRepository.findById(id).orElse(
-                SnippetStatus(snippetId = id),
-            )
-        val content = snippetStore.get(id) ?: snippet.content
-        return mapToResponse(snippet, status, content)
+        val status = statusRepository.findById(id).orElse(SnippetStatus(snippetId = id))
+        return mapToResponse(snippet, status, snippetStore.get(id))
     }
 
     @Transactional(readOnly = true)
     fun getSnippetContent(
         id: UUID,
-        userId: String = "anonymous",
+        userId: String,
     ): String {
-        val snippet =
-            snippetRepository.findById(id).orElseThrow {
-                ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
-            }
-
+        val snippet = findSnippet(id)
         assertCanView(snippet, userId)
-        return snippetStore.get(id) ?: snippet.content
+        return loadContent(id)
     }
 
     @Transactional(readOnly = true)
     fun formatSnippet(
         id: UUID,
-        userId: String = "anonymous",
+        userId: String,
+        content: String? = null,
     ): String {
-        val snippet =
-            snippetRepository.findById(id).orElseThrow {
-                ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
-            }
+        val snippet = findSnippet(id)
         assertCanView(snippet, userId)
-
         val rules = permissionClient.getFormatRules(userId)
-        val content = snippetStore.get(id) ?: snippet.content
-        return runnerClient.format(content, snippet.version, rules)
+        return runnerClient.format(content ?: loadContent(id), snippet.version, rules)
     }
 
     @Transactional
     fun lintSnippet(
         id: UUID,
-        userId: String = "anonymous",
+        userId: String,
     ): LintReportResponse {
-        val snippet =
-            snippetRepository.findById(id).orElseThrow {
-                ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
-            }
+        val snippet = findSnippet(id)
         assertCanView(snippet, userId)
-
         val rules = permissionClient.getLintRules(userId)
-        val content = snippetStore.get(id) ?: snippet.content
-        val result = runnerClient.lint(content, snippet.version, rules)
+        val result = runnerClient.lint(loadContent(id), snippet.version, rules)
         val complianceStatus = updateLintComplianceStatus(id, result.findingsCount)
 
         return LintReportResponse(
@@ -157,12 +137,10 @@ class SnippetService(
         return statusRepository.save(status).status
     }
 
-    @Transactional(readOnly = true)
-    fun listSnippets(
-        ownerId: String,
-        pageable: Pageable,
-    ): Page<SnippetResponse> = listSnippets(userId = ownerId, scope = SnippetScope.ALL, pageable = pageable)
-
+    /**
+     * El listado no incluye el contenido: traerlo obligaría a una llamada al asset-service por
+     * fila. El detalle (`getSnippet`) sí lo trae.
+     */
     @Transactional(readOnly = true)
     @Suppress("LongParameterList")
     fun listSnippets(
@@ -173,42 +151,36 @@ class SnippetService(
         status: ComplianceStatus? = null,
         pageable: Pageable,
     ): Page<SnippetResponse> {
-        val page = fetchSnippetsPage(userId, scope, name, language, status, pageable)
+        val accessibleIds = accessibleSnippetIds(userId, scope)
+        if (accessibleIds.isEmpty()) {
+            return PageImpl(emptyList(), pageable, 0)
+        }
+        val page = snippetRepository.findAllByIdsAndFilters(accessibleIds, name, language, status, pageable)
         return enrichSnippetResponses(page)
     }
 
-    @Suppress("LongParameterList")
-    private fun fetchSnippetsPage(
+    private fun accessibleSnippetIds(
         userId: String,
         scope: SnippetScope,
-        name: String?,
-        language: String?,
-        status: ComplianceStatus?,
-        pageable: Pageable,
-    ): Page<Snippet> =
-        when (scope) {
-            SnippetScope.OWNED -> {
-                snippetRepository.findAllByOwnerAndFilters(userId, name, language, status, pageable)
+    ): Set<UUID> {
+        val permissions =
+            try {
+                permissionClient.getUserPermissions(userId)
+            } catch (ex: RestClientException) {
+                throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Permission service unavailable", ex)
             }
-
-            SnippetScope.SHARED -> {
-                val sharedIds = getSharedSnippetIds(userId)
-                if (sharedIds.isEmpty()) {
-                    PageImpl(emptyList(), pageable, 0)
-                } else {
-                    snippetRepository.findAllByIdsAndFilters(sharedIds, name, language, status, pageable)
+        return permissions
+            .filter { permission ->
+                when (scope) {
+                    SnippetScope.OWNED -> permission.level == PermissionLevel.OWNER
+                    SnippetScope.SHARED ->
+                        permission.level == PermissionLevel.READ ||
+                            permission.level == PermissionLevel.WRITE
+                    SnippetScope.ALL -> permission.level != PermissionLevel.NONE
                 }
-            }
-
-            SnippetScope.ALL -> {
-                val sharedIds = getSharedSnippetIds(userId)
-                if (sharedIds.isEmpty()) {
-                    snippetRepository.findAllByOwnerAndFilters(userId, name, language, status, pageable)
-                } else {
-                    snippetRepository.findAllByOwnerOrIdsAndFilters(userId, sharedIds, name, language, status, pageable)
-                }
-            }
-        }
+            }.map { it.snippetId }
+            .toSet()
+    }
 
     private fun enrichSnippetResponses(page: Page<Snippet>): Page<SnippetResponse> {
         val snippetIds = page.content.map { it.id }
@@ -221,65 +193,52 @@ class SnippetService(
 
         return page.map { snippet ->
             val snippetStatus = statusMap[snippet.id] ?: SnippetStatus(snippetId = snippet.id)
-            val content = snippetStore.get(snippet.id) ?: snippet.content
-            mapToResponse(snippet, snippetStatus, content)
+            mapToResponse(snippet, snippetStatus, content = null)
         }
     }
-
-    private fun getSharedSnippetIds(userId: String): Set<UUID> =
-        try {
-            permissionClient
-                .getUserPermissions(userId)
-                .filter { it.level != PermissionLevel.NONE && it.level != PermissionLevel.OWNER }
-                .map { it.snippetId }
-                .toSet()
-        } catch (_: Exception) {
-            emptySet()
-        }
 
     @Transactional
     fun updateSnippet(
         id: UUID,
-        ownerId: String,
+        userId: String,
         request: UpdateSnippetRequest,
     ): SnippetResponse {
-        val snippet =
-            snippetRepository.findById(id).orElseThrow {
-                ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
-            }
-        assertCanEdit(snippet, ownerId)
+        val snippet = findSnippet(id)
+        assertCanEdit(snippet, userId)
 
         request.name?.let { snippet.name = it }
+        val currentContent = snippetStore.get(id)
         request.content?.let { newContent ->
-            if (newContent != snippet.content) {
+            if (newContent != currentContent) {
                 applyContentUpdate(snippet, newContent)
             }
         }
         snippet.updatedAt = Instant.now()
         val updated = snippetRepository.save(snippet)
 
-        val status =
-            statusRepository.findById(id).orElse(
-                SnippetStatus(snippetId = id),
-            )
-        val content = snippetStore.get(id) ?: updated.content
-        return mapToResponse(updated, status, content)
+        val status = statusRepository.findById(id).orElse(SnippetStatus(snippetId = id))
+        return mapToResponse(updated, status, request.content ?: currentContent)
     }
 
     @Transactional
     fun deleteSnippet(
         id: UUID,
-        ownerId: String,
+        userId: String,
     ) {
-        val snippet =
-            snippetRepository.findById(id).orElseThrow {
-                ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
-            }
-
-        assertIsOwner(snippet, ownerId)
+        val snippet = findSnippet(id)
+        assertIsOwner(snippet, userId)
         snippetRepository.delete(snippet)
         snippetStore.delete(id)
     }
+
+    private fun findSnippet(id: UUID): Snippet =
+        snippetRepository.findById(id).orElseThrow {
+            ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
+        }
+
+    private fun loadContent(id: UUID): String =
+        snippetStore.get(id)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet content not found in storage")
 
     private fun assertCanEdit(
         snippet: Snippet,
@@ -317,12 +276,8 @@ class SnippetService(
         newContent: String,
     ) {
         validateSnippetSyntax(newContent, snippet.version)
-        snippet.content = newContent
         snippetStore.put(snippet.id, newContent)
-        val status =
-            statusRepository.findById(snippet.id).orElse(
-                SnippetStatus(snippetId = snippet.id),
-            )
+        val status = statusRepository.findById(snippet.id).orElse(SnippetStatus(snippetId = snippet.id))
         status.status = ComplianceStatus.PENDING
         statusRepository.save(status)
         snippetTestRunner?.runTestsQuietly(snippet.id, newContent, snippet.version)
@@ -348,7 +303,7 @@ class SnippetService(
     private fun mapToResponse(
         snippet: Snippet,
         status: SnippetStatus,
-        content: String = snippet.content,
+        content: String?,
     ): SnippetResponse =
         SnippetResponse(
             id = snippet.id,

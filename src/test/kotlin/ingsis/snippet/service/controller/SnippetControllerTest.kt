@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.eq
+import org.mockito.kotlin.isNull
 import org.mockito.kotlin.whenever
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -117,7 +118,7 @@ class SnippetControllerTest {
 
     @Test
     fun shouldFormatSnippetEndpoint() {
-        whenever(snippetService.formatSnippet(eq(sampleSnippet.id), any()))
+        whenever(snippetService.formatSnippet(eq(sampleSnippet.id), any(), isNull()))
             .thenReturn("let a = 1;")
 
         mockMvc
@@ -126,6 +127,28 @@ class SnippetControllerTest {
                     .with(jwt().jwt { it.subject("auth0|123") }),
             ).andExpect(status().isOk)
             .andExpect(jsonPath("$.formattedContent").value("let a = 1;"))
+    }
+
+    @Test
+    fun shouldFormatUnsavedEditorContentWhenBodyCarriesIt() {
+        whenever(snippetService.formatSnippet(eq(sampleSnippet.id), any(), eq("let b=2;")))
+            .thenReturn("let b = 2;")
+
+        mockMvc
+            .perform(
+                post("/api/snippets/{id}/format", sampleSnippet.id)
+                    .with(jwt().jwt { it.subject("auth0|123") })
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"content":"let b=2;"}"""),
+            ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.formattedContent").value("let b = 2;"))
+    }
+
+    @Test
+    fun shouldRejectSnippetRequestsWithoutToken() {
+        mockMvc
+            .perform(get("/api/snippets/{id}", sampleSnippet.id))
+            .andExpect(status().isUnauthorized)
     }
 
     @Test

@@ -11,6 +11,7 @@ import ingsis.snippet.service.controller.dto.TestCaseResponse
 import ingsis.snippet.service.domain.model.TestCase
 import ingsis.snippet.service.domain.repository.SnippetRepository
 import ingsis.snippet.service.domain.repository.TestCaseRepository
+import ingsis.snippet.service.store.SnippetStore
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -23,6 +24,7 @@ class TestCaseService(
     private val snippetRepository: SnippetRepository,
     private val permissionClient: PermissionClient,
     private val runnerClient: RunnerClient,
+    private val snippetStore: SnippetStore,
     private val objectMapper: ObjectMapper,
 ) {
     @Transactional
@@ -61,6 +63,25 @@ class TestCaseService(
     }
 
     @Transactional
+    fun updateTestCase(
+        snippetId: UUID,
+        testCaseId: UUID,
+        userId: String,
+        request: CreateTestCaseRequest,
+    ): TestCaseResponse {
+        assertCanWrite(snippetId, userId)
+        val testCase =
+            testCaseRepository
+                .findBySnippetIdAndId(snippetId, testCaseId)
+                .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "Test case not found") }
+        testCase.name = request.name
+        testCase.inputs = objectMapper.writeValueAsString(request.inputs)
+        testCase.expectedOutputs = objectMapper.writeValueAsString(request.expectedOutputs)
+        testCase.env = request.env?.let { objectMapper.writeValueAsString(it) }
+        return mapToResponse(testCaseRepository.save(testCase))
+    }
+
+    @Transactional
     fun deleteTestCase(
         snippetId: UUID,
         testCaseId: UUID,
@@ -89,7 +110,7 @@ class TestCaseService(
                 .findBySnippetIdAndId(snippetId, testCaseId)
                 .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "Test case not found") }
 
-        return executeSingleTest(snippet.content, snippet.version, testCase)
+        return executeSingleTest(loadContent(snippetId), snippet.version, testCase)
     }
 
     @Transactional(readOnly = true)
@@ -102,9 +123,14 @@ class TestCaseService(
             snippetRepository
                 .findById(snippetId)
                 .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found") }
+        val content = loadContent(snippetId)
         val testCases = testCaseRepository.findAllBySnippetId(snippetId)
-        return testCases.map { executeSingleTest(snippet.content, snippet.version, it) }
+        return testCases.map { executeSingleTest(content, snippet.version, it) }
     }
+
+    private fun loadContent(snippetId: UUID): String =
+        snippetStore.get(snippetId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet content not found in storage")
 
     private fun executeSingleTest(
         content: String,

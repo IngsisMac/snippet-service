@@ -7,6 +7,11 @@ import jakarta.persistence.Table
 import java.time.Instant
 import java.util.UUID
 
+/**
+ * Metadata del snippet. El contenido no vive acá: está en el asset-service y se accede por
+ * `SnippetStore` usando el `id`. `ownerId` registra quién lo creó; los permisos efectivos
+ * (incluida una transferencia de ownership) los decide `permission-service`.
+ */
 @Entity
 @Table(name = "snippets")
 class Snippet(
@@ -20,8 +25,6 @@ class Snippet(
     var language: String,
     @Column(nullable = false)
     var version: String,
-    @Column(name = "content", columnDefinition = "TEXT", nullable = false)
-    var content: String = "",
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
     @Column(name = "updated_at", nullable = false)

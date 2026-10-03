@@ -93,6 +93,7 @@ class SnippetServiceTest {
         assertEquals(ownerId, response.ownerId)
         assertEquals(ComplianceStatus.PENDING, response.status)
         assertEquals(PermissionLevel.OWNER, fakePermissionClient.getPermission(response.id, ownerId))
+        assertEquals("let a: number = 5;", snippetStore.get(response.id))
         verify(snippetRepository).save(any<Snippet>())
         verify(statusRepository).save(any<SnippetStatus>())
     }
@@ -344,7 +345,6 @@ class SnippetServiceTest {
                 ownerId = ownerId,
                 language = "printscript",
                 version = "1.1",
-                content = "let x: number = 1;",
             )
         val request = UpdateSnippetRequest(content = "let x: number = 2;")
         val status = SnippetStatus(snippetId = id, status = ComplianceStatus.COMPLIANT)
@@ -374,7 +374,6 @@ class SnippetServiceTest {
                 ownerId = ownerId,
                 language = "printscript",
                 version = "1.1",
-                content = "let x: number = 1;",
             )
         val request = UpdateSnippetRequest(content = "invalid syntax code")
 
@@ -401,7 +400,6 @@ class SnippetServiceTest {
                 ownerId = ownerId,
                 language = "printscript",
                 version = "1.1",
-                content = "initial content",
             )
         snippetStore.put(id, "stored blob content")
 
@@ -447,7 +445,6 @@ class SnippetServiceTest {
                 ownerId = ownerId,
                 language = "printscript",
                 version = "1.1",
-                content = "let a=1;",
             )
         snippetStore.put(id, "let a=1;")
         fakePermissionClient.setPermission(id, ownerId, PermissionLevel.OWNER)
@@ -461,6 +458,28 @@ class SnippetServiceTest {
     }
 
     @Test
+    fun shouldFormatProvidedContentInsteadOfStoredOne() {
+        val id = UUID.randomUUID()
+        val ownerId = "auth0|owner"
+        val snippet =
+            Snippet(
+                id = id,
+                name = "Editing",
+                ownerId = ownerId,
+                language = "printscript",
+                version = "1.1",
+            )
+        snippetStore.put(id, "let stored=1;")
+        fakePermissionClient.setPermission(id, ownerId, PermissionLevel.READ)
+        whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
+
+        val formatted = snippetService.formatSnippet(id, ownerId, "let draft=2;")
+
+        assertEquals("let draft=2;", formatted)
+        assertEquals("let stored=1;", snippetStore.get(id))
+    }
+
+    @Test
     fun shouldLintSnippetAndMarkCompliantWhenNoFindings() {
         val id = UUID.randomUUID()
         val ownerId = "auth0|owner"
@@ -471,7 +490,6 @@ class SnippetServiceTest {
                 ownerId = ownerId,
                 language = "printscript",
                 version = "1.1",
-                content = "let a: number = 1;",
             )
         val status = SnippetStatus(snippetId = id, status = ComplianceStatus.PENDING)
         snippetStore.put(id, "let a: number = 1;")
@@ -498,7 +516,6 @@ class SnippetServiceTest {
                 ownerId = ownerId,
                 language = "printscript",
                 version = "1.1",
-                content = "let a: number = 1;",
             )
         val status = SnippetStatus(snippetId = id, status = ComplianceStatus.PENDING)
         snippetStore.put(id, "let a: number = 1;")
@@ -530,7 +547,6 @@ class SnippetServiceTest {
                 ownerId = ownerId,
                 language = "printscript",
                 version = "1.1",
-                content = "let a: number = 1;",
             )
         val status = SnippetStatus(snippetId = id, status = ComplianceStatus.COMPLIANT)
         val testCase =
@@ -541,6 +557,7 @@ class SnippetServiceTest {
                 expectedOutputs = "[\"2\"]",
             )
 
+        snippetStore.put(id, "let a: number = 1;")
         fakePermissionClient.setPermission(id, ownerId, PermissionLevel.OWNER)
         whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
         whenever(snippetRepository.save(any<Snippet>())).thenReturn(snippet)
@@ -554,7 +571,55 @@ class SnippetServiceTest {
         val updated = snippetService.updateSnippet(id, ownerId, UpdateSnippetRequest(content = "let a: number = 2;"))
 
         assertEquals("let a: number = 2;", updated.content)
+        assertEquals("let a: number = 2;", snippetStore.get(id))
         verify(snippetRepository).save(snippet)
+    }
+
+    @Test
+    fun shouldNotRevalidateWhenUpdatedContentIsIdenticalToStoredContent() {
+        val id = UUID.randomUUID()
+        val ownerId = "auth0|owner"
+        val snippet =
+            Snippet(
+                id = id,
+                name = "Same",
+                ownerId = ownerId,
+                language = "printscript",
+                version = "1.1",
+            )
+        snippetStore.put(id, "let a: number = 1;")
+        fakePermissionClient.setPermission(id, ownerId, PermissionLevel.OWNER)
+        fakeRunnerClient.setValidationResult("let a: number = 1;", false, listOf("would fail if revalidated"))
+        whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
+        whenever(snippetRepository.save(any<Snippet>())).thenReturn(snippet)
+        whenever(statusRepository.findById(id)).thenReturn(Optional.of(SnippetStatus(snippetId = id)))
+
+        val updated = snippetService.updateSnippet(id, ownerId, UpdateSnippetRequest(content = "let a: number = 1;"))
+
+        assertEquals("let a: number = 1;", updated.content)
+    }
+
+    @Test
+    fun shouldReturnNotFoundWhenDownloadingContentMissingFromStorage() {
+        val id = UUID.randomUUID()
+        val ownerId = "auth0|owner"
+        val snippet =
+            Snippet(
+                id = id,
+                name = "Orphan",
+                ownerId = ownerId,
+                language = "printscript",
+                version = "1.1",
+            )
+        fakePermissionClient.setPermission(id, ownerId, PermissionLevel.OWNER)
+        whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
+
+        val exception =
+            assertThrows<ResponseStatusException> {
+                snippetService.getSnippetContent(id, ownerId)
+            }
+
+        assertEquals(HttpStatus.NOT_FOUND, exception.statusCode)
     }
 
     @Test

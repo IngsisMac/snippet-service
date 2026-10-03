@@ -10,7 +10,7 @@ data class SnippetResponse(
     val ownerId: String,
     val language: String,
     val version: String,
-    val content: String = "",
+    val content: String? = null,
     val status: ComplianceStatus,
     val rulesVersion: Int,
     val findingsCount: Int,

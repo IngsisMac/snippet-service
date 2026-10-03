@@ -1,5 +1,6 @@
 package ingsis.snippet.service.service
 
+import ingsis.snippet.service.client.PermissionClient
 import ingsis.snippet.service.client.dto.PermissionLevel
 import ingsis.snippet.service.client.fake.FakePermissionClient
 import ingsis.snippet.service.client.fake.FakeRunnerClient
@@ -11,15 +12,22 @@ import ingsis.snippet.service.domain.repository.SnippetRepository
 import ingsis.snippet.service.domain.repository.SnippetStatusRepository
 import ingsis.snippet.service.store.InMemorySnippetStore
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.mockito.kotlin.any
+import org.mockito.kotlin.anyOrNull
+import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.PageRequest
+import org.springframework.http.HttpStatus
+import org.springframework.web.client.ResourceAccessException
+import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 class SnippetListTest {
@@ -29,6 +37,9 @@ class SnippetListTest {
     private lateinit var fakePermissionClient: FakePermissionClient
     private lateinit var snippetStore: InMemorySnippetStore
     private lateinit var snippetService: SnippetService
+
+    private val userId = "auth0|user123"
+    private val pageable = PageRequest.of(0, 10)
 
     @BeforeEach
     fun setUp() {
@@ -47,194 +58,128 @@ class SnippetListTest {
             )
     }
 
-    @Test
-    fun shouldListSnippetsWithDefaultAllScope() {
-        val ownerId = "auth0|user123"
-        val pageable = PageRequest.of(0, 10)
-        val snippet =
-            Snippet(
-                name = "Snippet 1",
-                ownerId = ownerId,
-                language = "printscript",
-                version = "1.0",
-            )
-        val page = PageImpl(listOf(snippet))
-        val status = SnippetStatus(snippetId = snippet.id)
-
-        whenever(
-            snippetRepository.findAllByOwnerAndFilters(
-                ownerId = ownerId,
-                name = null,
-                language = null,
-                status = null,
-                pageable = pageable,
-            ),
-        ).thenReturn(page)
-        whenever(statusRepository.findAllById(listOf(snippet.id))).thenReturn(listOf(status))
-
-        val result = snippetService.listSnippets(ownerId, pageable)
-
-        assertEquals(1, result.totalElements)
-        assertEquals("Snippet 1", result.content[0].name)
-    }
+    private fun snippetNamed(
+        name: String,
+        creator: String = userId,
+    ): Snippet = Snippet(name = name, ownerId = creator, language = "printscript", version = "1.1")
 
     @Test
-    fun shouldListSnippetsWithOwnedScope() {
-        val ownerId = "auth0|user123"
-        val pageable = PageRequest.of(0, 10)
-        val snippet =
-            Snippet(
-                name = "My Snippet",
-                ownerId = ownerId,
-                language = "printscript",
-                version = "1.1",
-            )
-        val page = PageImpl(listOf(snippet))
-        val status = SnippetStatus(snippetId = snippet.id)
-
-        whenever(
-            snippetRepository.findAllByOwnerAndFilters(
-                ownerId = ownerId,
-                name = null,
-                language = null,
-                status = null,
-                pageable = pageable,
-            ),
-        ).thenReturn(page)
-        whenever(statusRepository.findAllById(listOf(snippet.id))).thenReturn(listOf(status))
-
-        val result =
-            snippetService.listSnippets(
-                userId = ownerId,
-                scope = SnippetScope.OWNED,
-                pageable = pageable,
-            )
-
-        assertEquals(1, result.totalElements)
-        assertEquals("My Snippet", result.content[0].name)
-    }
-
-    @Test
-    fun shouldListSharedSnippetsWhenUserHasPermissions() {
-        val userId = "auth0|collaborator"
-        val sharedSnippetId = UUID.randomUUID()
-        val pageable = PageRequest.of(0, 10)
-        val sharedSnippet =
-            Snippet(
-                id = sharedSnippetId,
-                name = "Shared Code",
-                ownerId = "auth0|other",
-                language = "printscript",
-                version = "1.1",
-            )
-        val page = PageImpl(listOf(sharedSnippet))
-        val status = SnippetStatus(snippetId = sharedSnippetId)
-
-        fakePermissionClient.setPermission(sharedSnippetId, userId, PermissionLevel.READ)
+    fun shouldListOnlyOwnedSnippetsAccordingToPermissionService() {
+        val owned = snippetNamed("Mine")
+        val shared = snippetNamed("Shared with me", creator = "auth0|other")
+        fakePermissionClient.setPermission(owned.id, userId, PermissionLevel.OWNER)
+        fakePermissionClient.setPermission(shared.id, userId, PermissionLevel.READ)
         whenever(
             snippetRepository.findAllByIdsAndFilters(
-                ids = setOf(sharedSnippetId),
-                name = null,
-                language = null,
-                status = null,
-                pageable = pageable,
-            ),
-        ).thenReturn(page)
-        whenever(statusRepository.findAllById(listOf(sharedSnippetId))).thenReturn(listOf(status))
-
-        val result =
-            snippetService.listSnippets(
-                userId = userId,
-                scope = SnippetScope.SHARED,
-                pageable = pageable,
+                eq(setOf(owned.id)),
+                anyOrNull(),
+                anyOrNull(),
+                anyOrNull(),
+                eq(pageable)
             )
+        ).thenReturn(PageImpl(listOf(owned)))
+        whenever(statusRepository.findAllById(listOf(owned.id))).thenReturn(listOf(SnippetStatus(snippetId = owned.id)))
+
+        val result = snippetService.listSnippets(userId = userId, scope = SnippetScope.OWNED, pageable = pageable)
 
         assertEquals(1, result.totalElements)
-        assertEquals("Shared Code", result.content[0].name)
+        assertEquals("Mine", result.content[0].name)
     }
 
     @Test
-    fun shouldReturnEmptyPageWhenUserHasNoSharedSnippetsInSharedScope() {
-        val userId = "auth0|lonely"
-        val pageable = PageRequest.of(0, 10)
-
-        val result =
-            snippetService.listSnippets(
-                userId = userId,
-                scope = SnippetScope.SHARED,
-                pageable = pageable,
+    fun shouldTreatTransferredSnippetAsOwnedByTheNewOwnerEvenIfCreatedByAnotherUser() {
+        val transferred = snippetNamed("Inherited", creator = "auth0|previous-owner")
+        fakePermissionClient.setPermission(transferred.id, userId, PermissionLevel.OWNER)
+        whenever(
+            snippetRepository.findAllByIdsAndFilters(
+                eq(setOf(transferred.id)),
+                anyOrNull(),
+                anyOrNull(),
+                anyOrNull(),
+                eq(pageable)
             )
+        ).thenReturn(PageImpl(listOf(transferred)))
+        whenever(statusRepository.findAllById(listOf(transferred.id))).thenReturn(emptyList())
+
+        val result = snippetService.listSnippets(userId = userId, scope = SnippetScope.OWNED, pageable = pageable)
+
+        assertEquals(1, result.totalElements)
+        assertEquals("Inherited", result.content[0].name)
+    }
+
+    @Test
+    fun shouldListSharedSnippetsWithReadOrWriteLevel() {
+        val readable = snippetNamed("Readable", creator = "auth0|other")
+        val writable = snippetNamed("Writable", creator = "auth0|other")
+        val owned = snippetNamed("Mine")
+        fakePermissionClient.setPermission(readable.id, userId, PermissionLevel.READ)
+        fakePermissionClient.setPermission(writable.id, userId, PermissionLevel.WRITE)
+        fakePermissionClient.setPermission(owned.id, userId, PermissionLevel.OWNER)
+        whenever(
+            snippetRepository.findAllByIdsAndFilters(
+                eq(setOf(readable.id, writable.id)),
+                anyOrNull(),
+                anyOrNull(),
+                anyOrNull(),
+                eq(pageable),
+            ),
+        ).thenReturn(PageImpl(listOf(readable, writable)))
+        whenever(statusRepository.findAllById(any<List<UUID>>())).thenReturn(emptyList())
+
+        val result = snippetService.listSnippets(userId = userId, scope = SnippetScope.SHARED, pageable = pageable)
+
+        assertEquals(2, result.totalElements)
+    }
+
+    @Test
+    fun shouldReturnEmptyPageWithoutQueryingDatabaseWhenUserHasNoAccessibleSnippets() {
+        val result = snippetService.listSnippets(userId = "auth0|lonely", scope = SnippetScope.ALL, pageable = pageable)
 
         assertEquals(0, result.totalElements)
-        verify(snippetRepository, never()).findAllByIdsAndFilters(any(), any(), any(), any(), any())
+        verify(snippetRepository, never()).findAllByIdsAndFilters(any(), anyOrNull(), anyOrNull(), anyOrNull(), any())
     }
 
     @Test
-    fun shouldListAllSnippetsWhenUserHasBothOwnedAndSharedSnippets() {
-        val userId = "auth0|user123"
-        val sharedSnippetId = UUID.randomUUID()
-        val pageable = PageRequest.of(0, 10)
-        val snippet =
-            Snippet(
-                name = "Snippet 1",
-                ownerId = userId,
-                language = "printscript",
-                version = "1.0",
-            )
-        val page = PageImpl(listOf(snippet))
-        val status = SnippetStatus(snippetId = snippet.id)
-
-        fakePermissionClient.setPermission(sharedSnippetId, userId, PermissionLevel.WRITE)
+    fun shouldListOwnedAndSharedTogetherInAllScope() {
+        val owned = snippetNamed("Mine")
+        val shared = snippetNamed("Shared", creator = "auth0|other")
+        fakePermissionClient.setPermission(owned.id, userId, PermissionLevel.OWNER)
+        fakePermissionClient.setPermission(shared.id, userId, PermissionLevel.WRITE)
         whenever(
-            snippetRepository.findAllByOwnerOrIdsAndFilters(
-                ownerId = userId,
-                ids = setOf(sharedSnippetId),
-                name = null,
-                language = null,
-                status = null,
-                pageable = pageable,
+            snippetRepository.findAllByIdsAndFilters(
+                eq(setOf(owned.id, shared.id)),
+                anyOrNull(),
+                anyOrNull(),
+                anyOrNull(),
+                eq(pageable),
             ),
-        ).thenReturn(page)
-        whenever(statusRepository.findAllById(listOf(snippet.id))).thenReturn(listOf(status))
+        ).thenReturn(PageImpl(listOf(owned, shared)))
+        whenever(statusRepository.findAllById(any<List<UUID>>())).thenReturn(emptyList())
+
+        val result = snippetService.listSnippets(userId = userId, scope = SnippetScope.ALL, pageable = pageable)
+
+        assertEquals(2, result.totalElements)
+    }
+
+    @Test
+    fun shouldPassFiltersThroughToRepository() {
+        val owned = snippetNamed("Calculadora")
+        fakePermissionClient.setPermission(owned.id, userId, PermissionLevel.OWNER)
+        whenever(
+            snippetRepository.findAllByIdsAndFilters(
+                setOf(owned.id),
+                "Calculadora",
+                "printscript",
+                ComplianceStatus.COMPLIANT,
+                pageable,
+            ),
+        ).thenReturn(PageImpl(listOf(owned)))
+        whenever(statusRepository.findAllById(listOf(owned.id)))
+            .thenReturn(listOf(SnippetStatus(snippetId = owned.id, status = ComplianceStatus.COMPLIANT)))
 
         val result =
             snippetService.listSnippets(
                 userId = userId,
-                scope = SnippetScope.ALL,
-                pageable = pageable,
-            )
-
-        assertEquals(1, result.totalElements)
-    }
-
-    @Test
-    fun shouldFilterSnippetsByNameLanguageAndStatus() {
-        val ownerId = "auth0|user123"
-        val pageable = PageRequest.of(0, 10)
-        val snippet =
-            Snippet(
-                name = "Calculadora",
-                ownerId = ownerId,
-                language = "printscript",
-                version = "1.1",
-            )
-        val page = PageImpl(listOf(snippet))
-        val status = SnippetStatus(snippetId = snippet.id, status = ComplianceStatus.COMPLIANT)
-
-        whenever(
-            snippetRepository.findAllByOwnerAndFilters(
-                ownerId = ownerId,
-                name = "Calculadora",
-                language = "printscript",
-                status = ComplianceStatus.COMPLIANT,
-                pageable = pageable,
-            ),
-        ).thenReturn(page)
-        whenever(statusRepository.findAllById(listOf(snippet.id))).thenReturn(listOf(status))
-
-        val result =
-            snippetService.listSnippets(
-                userId = ownerId,
                 scope = SnippetScope.OWNED,
                 name = "Calculadora",
                 language = "printscript",
@@ -243,6 +188,49 @@ class SnippetListTest {
             )
 
         assertEquals(1, result.totalElements)
-        assertEquals("Calculadora", result.content[0].name)
+        assertEquals(ComplianceStatus.COMPLIANT, result.content[0].status)
+    }
+
+    @Test
+    fun shouldOmitContentInListings() {
+        val owned = snippetNamed("Mine")
+        snippetStore.put(owned.id, "println(1);")
+        fakePermissionClient.setPermission(owned.id, userId, PermissionLevel.OWNER)
+        whenever(
+            snippetRepository.findAllByIdsAndFilters(
+                eq(setOf(owned.id)),
+                anyOrNull(),
+                anyOrNull(),
+                anyOrNull(),
+                eq(pageable)
+            )
+        ).thenReturn(PageImpl(listOf(owned)))
+        whenever(statusRepository.findAllById(listOf(owned.id))).thenReturn(emptyList())
+
+        val result = snippetService.listSnippets(userId = userId, scope = SnippetScope.OWNED, pageable = pageable)
+
+        assertNull(result.content[0].content)
+    }
+
+    @Test
+    fun shouldAnswerServiceUnavailableWhenPermissionServiceCannotBeReached() {
+        val failingPermissionClient: PermissionClient = mock()
+        whenever(failingPermissionClient.getUserPermissions(eq(userId), anyOrNull()))
+            .thenThrow(ResourceAccessException("connection refused"))
+        val service =
+            SnippetService(
+                snippetRepository = snippetRepository,
+                statusRepository = statusRepository,
+                runnerClient = fakeRunnerClient,
+                permissionClient = failingPermissionClient,
+                snippetStore = snippetStore,
+            )
+
+        val exception =
+            assertThrows<ResponseStatusException> {
+                service.listSnippets(userId = userId, scope = SnippetScope.ALL, pageable = pageable)
+            }
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, exception.statusCode)
     }
 }

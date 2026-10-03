@@ -23,7 +23,8 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: ${AUTH0_ISSUER_URI:https://dev-ingsis.auth0.com/}
+          issuer-uri: ${AUTH0_ISSUER_URI:https://dev-o02i7bmya113pn5u.us.auth0.com/}
+          audiences: ${AUTH0_AUDIENCE:https://snippet-searcher.ingsis/}
 
 springdoc:
   api-docs:
@@ -49,4 +50,10 @@ snippet:
   store:
     type: ${SNIPPET_STORE_TYPE:asset-service}
 
-
+auth:
+  m2m:
+    enabled: ${AUTH0_M2M_ENABLED:false}
+    token-uri: ${AUTH0_M2M_TOKEN_URI:https://dev-o02i7bmya113pn5u.us.auth0.com/oauth/token}
+    client-id: ${AUTH0_M2M_CLIENT_ID:}
+    client-secret: ${AUTH0_M2M_CLIENT_SECRET:}
+    audience: ${AUTH0_AUDIENCE:https://snippet-searcher.ingsis/}

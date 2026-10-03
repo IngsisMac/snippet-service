@@ -1,6 +1,7 @@
 package ingsis.snippet.service.controller
 
 import ingsis.snippet.service.controller.dto.CreateSnippetRequest
+import ingsis.snippet.service.controller.dto.FormatSnippetRequest
 import ingsis.snippet.service.controller.dto.LintReportResponse
 import ingsis.snippet.service.controller.dto.SnippetResponse
 import ingsis.snippet.service.controller.dto.UpdateSnippetRequest
@@ -34,10 +35,10 @@ class SnippetController(
 ) {
     @PostMapping
     fun createSnippet(
-        @AuthenticationPrincipal jwt: Jwt?,
+        @AuthenticationPrincipal jwt: Jwt,
         @Valid @RequestBody request: CreateSnippetRequest,
     ): ResponseEntity<SnippetResponse> {
-        val ownerId = jwt?.subject ?: "anonymous"
+        val ownerId = jwt.subject
         val created = snippetService.createSnippet(ownerId, request)
         return ResponseEntity.status(HttpStatus.CREATED).body(created)
     }
@@ -45,18 +46,18 @@ class SnippetController(
     @GetMapping("/{id}")
     fun getSnippet(
         @PathVariable id: UUID,
-        @AuthenticationPrincipal jwt: Jwt?,
+        @AuthenticationPrincipal jwt: Jwt,
     ): SnippetResponse {
-        val userId = jwt?.subject ?: "anonymous"
+        val userId = jwt.subject
         return snippetService.getSnippet(id, userId)
     }
 
     @GetMapping("/{id}/content")
     fun getSnippetContent(
         @PathVariable id: UUID,
-        @AuthenticationPrincipal jwt: Jwt?,
+        @AuthenticationPrincipal jwt: Jwt,
     ): Map<String, String> {
-        val userId = jwt?.subject ?: "anonymous"
+        val userId = jwt.subject
         val content = snippetService.getSnippetContent(id, userId)
         return mapOf("content" to content)
     }
@@ -64,7 +65,7 @@ class SnippetController(
     @GetMapping
     @Suppress("LongParameterList")
     fun listSnippets(
-        @AuthenticationPrincipal jwt: Jwt?,
+        @AuthenticationPrincipal jwt: Jwt,
         @RequestParam(required = false, defaultValue = "ALL") scope: SnippetScope,
         @RequestParam(required = false) name: String?,
         @RequestParam(required = false) snippetName: String?,
@@ -72,7 +73,7 @@ class SnippetController(
         @RequestParam(required = false) status: ComplianceStatus?,
         @PageableDefault(size = 20) pageable: Pageable,
     ): Page<SnippetResponse> {
-        val userId = jwt?.subject ?: "anonymous"
+        val userId = jwt.subject
         val queryName = (name ?: snippetName)?.trim()?.takeIf { it.isNotEmpty() }
         return snippetService.listSnippets(
             userId = userId,
@@ -87,39 +88,45 @@ class SnippetController(
     @PutMapping("/{id}")
     fun updateSnippet(
         @PathVariable id: UUID,
-        @AuthenticationPrincipal jwt: Jwt?,
+        @AuthenticationPrincipal jwt: Jwt,
         @RequestBody request: UpdateSnippetRequest,
     ): SnippetResponse {
-        val ownerId = jwt?.subject ?: "anonymous"
-        return snippetService.updateSnippet(id, ownerId, request)
+        val userId = jwt.subject
+        return snippetService.updateSnippet(id, userId, request)
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun deleteSnippet(
         @PathVariable id: UUID,
-        @AuthenticationPrincipal jwt: Jwt?,
+        @AuthenticationPrincipal jwt: Jwt,
     ) {
-        val ownerId = jwt?.subject ?: "anonymous"
-        snippetService.deleteSnippet(id, ownerId)
+        val userId = jwt.subject
+        snippetService.deleteSnippet(id, userId)
     }
 
+    /**
+     * Formatea el contenido guardado del snippet o, si el body trae `content`, ese texto tal
+     * como está en el editor (todavía sin guardar). En ambos casos se exige permiso de lectura
+     * sobre el snippet y se usan las reglas de formato del usuario que pide.
+     */
     @PostMapping("/{id}/format")
     fun formatSnippet(
         @PathVariable id: UUID,
-        @AuthenticationPrincipal jwt: Jwt?,
+        @AuthenticationPrincipal jwt: Jwt,
+        @RequestBody(required = false) request: FormatSnippetRequest?,
     ): Map<String, String> {
-        val userId = jwt?.subject ?: "anonymous"
-        val formatted = snippetService.formatSnippet(id, userId)
+        val userId = jwt.subject
+        val formatted = snippetService.formatSnippet(id, userId, request?.content)
         return mapOf("formattedContent" to formatted)
     }
 
     @PostMapping("/{id}/lint")
     fun lintSnippet(
         @PathVariable id: UUID,
-        @AuthenticationPrincipal jwt: Jwt?,
+        @AuthenticationPrincipal jwt: Jwt,
     ): LintReportResponse {
-        val userId = jwt?.subject ?: "anonymous"
+        val userId = jwt.subject
         return snippetService.lintSnippet(id, userId)
     }
 }
