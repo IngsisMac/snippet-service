@@ -2,6 +2,7 @@ package ingsis.snippet.service.client
 
 import ingsis.snippet.service.client.dto.PermissionLevel
 import ingsis.snippet.service.client.dto.UserPermissionResponse
+import ingsis.snippet.service.client.dto.UserRulesResponse
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.web.client.RestClient
 import java.util.UUID
@@ -17,7 +18,7 @@ class HttpPermissionClient(
             .post()
             .uri { builder ->
                 builder
-                    .path("/api/permissions")
+                    .path("/internal/permissions")
                     .queryParam("snippetId", snippetId)
                     .queryParam("userId", userId)
                     .build()
@@ -35,7 +36,7 @@ class HttpPermissionClient(
                 .get()
                 .uri { builder ->
                     builder
-                        .path("/api/permissions/{snippetId}")
+                        .path("/internal/permissions/{snippetId}")
                         .queryParam("user", userId)
                         .build(snippetId)
                 }.retrieve()
@@ -53,9 +54,9 @@ class HttpPermissionClient(
         val response =
             restClient
                 .get()
-                .uri("/api/permissions/rules/lint/{userId}", userId)
+                .uri("/internal/rules/lint/{userId}", userId)
                 .retrieve()
-                .body(ingsis.snippet.service.client.dto.UserRulesResponse::class.java)
+                .body(UserRulesResponse::class.java)
         return response?.rules ?: emptyMap()
     }
 
@@ -63,9 +64,9 @@ class HttpPermissionClient(
         val response =
             restClient
                 .get()
-                .uri("/api/permissions/rules/format/{userId}", userId)
+                .uri("/internal/rules/format/{userId}", userId)
                 .retrieve()
-                .body(ingsis.snippet.service.client.dto.UserRulesResponse::class.java)
+                .body(UserRulesResponse::class.java)
         return response?.rules ?: emptyMap()
     }
 
@@ -78,7 +79,7 @@ class HttpPermissionClient(
             restClient
                 .get()
                 .uri { builder ->
-                    builder.path("/api/permissions/user/{userId}")
+                    builder.path("/internal/permissions/user/{userId}")
                     level?.let { builder.queryParam("level", it.name) }
                     builder.build(userId)
                 }.retrieve()

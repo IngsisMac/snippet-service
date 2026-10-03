@@ -10,7 +10,6 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.test.web.client.MockRestServiceServer
 import org.springframework.test.web.client.match.MockRestRequestMatchers.header
-import org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath
 import org.springframework.test.web.client.match.MockRestRequestMatchers.method
 import org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo
 import org.springframework.test.web.client.response.MockRestResponseCreators.withStatus
@@ -41,14 +40,9 @@ class AssetServiceSnippetStoreTest {
 
         mockServer
             .expect(requestTo("$baseUrl/v1/asset/snippets/$snippetId"))
-            .andExpect(method(HttpMethod.POST))
-            .andExpect(header("Content-Type", MediaType.APPLICATION_JSON_VALUE))
-            .andExpect(jsonPath("$.content").value(content))
-            .andRespond(
-                withStatus(HttpStatus.CREATED)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body("""{"snippetId":"$snippetId","key":"snippets/$snippetId.ps","size":19}"""),
-            )
+            .andExpect(method(HttpMethod.PUT))
+            .andExpect(header("Content-Type", MediaType.TEXT_PLAIN_VALUE))
+            .andRespond(withStatus(HttpStatus.CREATED))
 
         store.put(snippetId, content)
 

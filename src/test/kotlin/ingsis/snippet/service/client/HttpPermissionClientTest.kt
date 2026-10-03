@@ -33,7 +33,9 @@ class HttpPermissionClientTest {
 
         mockServer
             .expect(
-                requestTo("http://permission-service:8081/api/permissions?snippetId=$snippetId&userId=auth0%7Cuser1"),
+                requestTo(
+                    "http://permission-service:8081/internal/permissions?snippetId=$snippetId&userId=auth0%7Cuser1"
+                ),
             ).andExpect(method(HttpMethod.POST))
             .andRespond(withSuccess())
 
@@ -48,7 +50,7 @@ class HttpPermissionClientTest {
         val userId = "auth0|user1"
 
         mockServer
-            .expect(requestTo("http://permission-service:8081/api/permissions/$snippetId?user=auth0%7Cuser1"))
+            .expect(requestTo("http://permission-service:8081/internal/permissions/$snippetId?user=auth0%7Cuser1"))
             .andExpect(method(HttpMethod.GET))
             .andRespond(
                 withSuccess(
@@ -69,7 +71,7 @@ class HttpPermissionClientTest {
         val userId = "auth0|user2"
 
         mockServer
-            .expect(requestTo("http://permission-service:8081/api/permissions/$snippetId?user=auth0%7Cuser2"))
+            .expect(requestTo("http://permission-service:8081/internal/permissions/$snippetId?user=auth0%7Cuser2"))
             .andExpect(method(HttpMethod.GET))
             .andRespond(
                 withSuccess(
@@ -88,7 +90,7 @@ class HttpPermissionClientTest {
     fun shouldGetLintRulesSuccessfully() {
         val userId = "auth0|user1"
         mockServer
-            .expect(requestTo("http://permission-service:8081/api/permissions/rules/lint/auth0%7Cuser1"))
+            .expect(requestTo("http://permission-service:8081/internal/rules/lint/auth0%7Cuser1"))
             .andExpect(method(HttpMethod.GET))
             .andRespond(
                 withSuccess(
@@ -107,7 +109,7 @@ class HttpPermissionClientTest {
     fun shouldGetFormatRulesSuccessfully() {
         val userId = "auth0|user1"
         mockServer
-            .expect(requestTo("http://permission-service:8081/api/permissions/rules/format/auth0%7Cuser1"))
+            .expect(requestTo("http://permission-service:8081/internal/rules/format/auth0%7Cuser1"))
             .andExpect(method(HttpMethod.GET))
             .andRespond(
                 withSuccess(
@@ -127,7 +129,7 @@ class HttpPermissionClientTest {
         val userId = "auth0|user1"
         val snippetId = UUID.randomUUID()
         mockServer
-            .expect(requestTo("http://permission-service:8081/api/permissions/user/auth0%7Cuser1"))
+            .expect(requestTo("http://permission-service:8081/internal/permissions/user/auth0%7Cuser1"))
             .andExpect(method(HttpMethod.GET))
             .andRespond(
                 withSuccess(
@@ -149,7 +151,7 @@ class HttpPermissionClientTest {
         val userId = "auth0|user1"
         val snippetId = UUID.randomUUID()
         mockServer
-            .expect(requestTo("http://permission-service:8081/api/permissions/user/auth0%7Cuser1?level=WRITE"))
+            .expect(requestTo("http://permission-service:8081/internal/permissions/user/auth0%7Cuser1?level=WRITE"))
             .andExpect(method(HttpMethod.GET))
             .andRespond(
                 withSuccess(

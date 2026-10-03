@@ -144,6 +144,7 @@ class SnippetServiceTest {
                 findingsCount = 0,
             )
 
+        fakePermissionClient.setPermission(id, ownerId, PermissionLevel.OWNER)
         whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
         whenever(statusRepository.findById(id)).thenReturn(Optional.of(status))
 
@@ -554,5 +555,51 @@ class SnippetServiceTest {
 
         assertEquals("let a: number = 2;", updated.content)
         verify(snippetRepository).save(snippet)
+    }
+
+    @Test
+    fun shouldDenyAccessToCreatorWhenPermissionServiceNoLongerListsThem() {
+        val id = UUID.randomUUID()
+        val formerOwnerId = "auth0|former-owner"
+        val snippet =
+            Snippet(
+                id = id,
+                name = "Transferred Snippet",
+                ownerId = formerOwnerId,
+                language = "printscript",
+                version = "1.1",
+            )
+        whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
+
+        val exception =
+            assertThrows<ResponseStatusException> {
+                snippetService.getSnippet(id, formerOwnerId)
+            }
+
+        assertEquals(HttpStatus.FORBIDDEN, exception.statusCode)
+    }
+
+    @Test
+    fun shouldDenyDeleteToCreatorDowngradedToWriteAfterTransfer() {
+        val id = UUID.randomUUID()
+        val formerOwnerId = "auth0|former-owner"
+        val snippet =
+            Snippet(
+                id = id,
+                name = "Transferred Snippet",
+                ownerId = formerOwnerId,
+                language = "printscript",
+                version = "1.1",
+            )
+        fakePermissionClient.setPermission(id, formerOwnerId, PermissionLevel.WRITE)
+        whenever(snippetRepository.findById(id)).thenReturn(Optional.of(snippet))
+
+        val exception =
+            assertThrows<ResponseStatusException> {
+                snippetService.deleteSnippet(id, formerOwnerId)
+            }
+
+        assertEquals(HttpStatus.FORBIDDEN, exception.statusCode)
+        verify(snippetRepository, never()).delete(snippet)
     }
 }

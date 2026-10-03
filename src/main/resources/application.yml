@@ -34,10 +34,16 @@ springdoc:
 services:
   runner:
     url: ${RUNNER_SERVICE_URL:http://localhost:8082}
+    connect-timeout: ${RUNNER_CONNECT_TIMEOUT:2s}
+    read-timeout: ${RUNNER_READ_TIMEOUT:5s}
   permission:
     url: ${PERMISSION_SERVICE_URL:http://localhost:8081}
+    connect-timeout: ${PERMISSION_CONNECT_TIMEOUT:2s}
+    read-timeout: ${PERMISSION_READ_TIMEOUT:3s}
   asset:
     url: ${ASSET_SERVICE_URL:http://localhost:8083}
+    connect-timeout: ${ASSET_CONNECT_TIMEOUT:2s}
+    read-timeout: ${ASSET_READ_TIMEOUT:3s}
 
 snippet:
   store:

@@ -24,6 +24,12 @@ import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 import java.util.UUID
 
+/**
+ * Toda decisión de acceso (ver, editar, borrar) se resuelve contra `permission-service` vía
+ * [PermissionClient]. La columna `owner_id` de `snippets` registra quién lo creó y sirve
+ * para el listado por autor, pero nunca otorga permisos por sí misma: así una
+ * transferencia de ownership hecha en permisos tiene efecto inmediato acá.
+ */
 @Service
 class SnippetService(
     private val snippetRepository: SnippetRepository,
@@ -76,11 +82,7 @@ class SnippetService(
                 ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
             }
 
-        val permission = permissionClient.getPermission(id, userId)
-        val hasAccess = permission != PermissionLevel.NONE || snippet.ownerId == userId
-        if (!hasAccess) {
-            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to view this snippet")
-        }
+        assertCanView(snippet, userId)
 
         val status =
             statusRepository.findById(id).orElse(
@@ -100,11 +102,7 @@ class SnippetService(
                 ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
             }
 
-        val permission = permissionClient.getPermission(id, userId)
-        val hasAccess = permission != PermissionLevel.NONE || snippet.ownerId == userId
-        if (!hasAccess) {
-            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to view this snippet")
-        }
+        assertCanView(snippet, userId)
         return snippetStore.get(id) ?: snippet.content
     }
 
@@ -278,11 +276,7 @@ class SnippetService(
                 ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
             }
 
-        val permission = permissionClient.getPermission(id, ownerId)
-        val isOwner = permission == PermissionLevel.OWNER || snippet.ownerId == ownerId
-        if (!isOwner) {
-            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to delete this snippet")
-        }
+        assertIsOwner(snippet, ownerId)
         snippetRepository.delete(snippet)
         snippetStore.delete(id)
     }
@@ -292,10 +286,19 @@ class SnippetService(
         userId: String,
     ) {
         val permission = permissionClient.getPermission(snippet.id, userId)
-        val canEdit =
-            permission == PermissionLevel.OWNER || permission == PermissionLevel.WRITE || snippet.ownerId == userId
+        val canEdit = permission == PermissionLevel.OWNER || permission == PermissionLevel.WRITE
         if (!canEdit) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to edit this snippet")
+        }
+    }
+
+    private fun assertIsOwner(
+        snippet: Snippet,
+        userId: String,
+    ) {
+        val permission = permissionClient.getPermission(snippet.id, userId)
+        if (permission != PermissionLevel.OWNER) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Only the owner can delete this snippet")
         }
     }
 
@@ -304,8 +307,7 @@ class SnippetService(
         userId: String,
     ) {
         val permission = permissionClient.getPermission(snippet.id, userId)
-        val hasAccess = permission != PermissionLevel.NONE || snippet.ownerId == userId
-        if (!hasAccess) {
+        if (permission == PermissionLevel.NONE) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to view this snippet")
         }
     }
