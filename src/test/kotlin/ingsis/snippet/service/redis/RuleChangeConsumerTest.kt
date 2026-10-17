@@ -1,8 +1,8 @@
 package ingsis.snippet.service.redis
 
-import com.fasterxml.jackson.databind.ObjectMapper
+import ingsis.snippet.redis.event.LintRequestEvent
+import ingsis.snippet.redis.event.LintRulesChangeEvent
 import ingsis.snippet.service.client.dto.PermissionLevel
-import ingsis.snippet.service.client.fake.FakeLintRequestPublisher
 import ingsis.snippet.service.client.fake.FakePermissionClient
 import ingsis.snippet.service.domain.model.ComplianceStatus
 import ingsis.snippet.service.domain.model.Snippet
@@ -16,8 +16,13 @@ import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argThat
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
+import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
-import org.springframework.data.redis.connection.stream.MapRecord
+import org.springframework.data.redis.connection.stream.ObjectRecord
+import org.springframework.data.redis.connection.stream.RecordId
+import org.springframework.data.redis.core.RedisTemplate
+import org.springframework.data.redis.core.StreamOperations
 import java.util.Optional
 import java.util.UUID
 
@@ -26,9 +31,11 @@ class RuleChangeConsumerTest {
     private lateinit var statusRepository: SnippetStatusRepository
     private lateinit var snippetStore: InMemorySnippetStore
     private lateinit var fakePermissionClient: FakePermissionClient
-    private lateinit var fakePublisher: FakeLintRequestPublisher
+    private lateinit var redisTemplate: RedisTemplate<String, String>
+    private lateinit var producerRedisTemplate: RedisTemplate<String, String>
+    private lateinit var streamOps: StreamOperations<String, String, Any>
+    private lateinit var producer: LintRequestProducer
     private lateinit var consumer: RuleChangeConsumer
-    private val objectMapper = ObjectMapper()
     private val userId = "auth0|user1"
 
     @BeforeEach
@@ -37,17 +44,24 @@ class RuleChangeConsumerTest {
         statusRepository = mock()
         snippetStore = InMemorySnippetStore()
         fakePermissionClient = FakePermissionClient()
-        fakePublisher = FakeLintRequestPublisher()
+        redisTemplate = mock()
+        producerRedisTemplate = mock()
+        streamOps = mock()
+
+        whenever(producerRedisTemplate.opsForStream<String, Any>()).thenReturn(streamOps)
+        whenever(streamOps.add(any())).thenReturn(RecordId.of("1-0"))
+        whenever(statusRepository.save(any<SnippetStatus>())).thenAnswer { it.arguments[0] }
+
+        producer = LintRequestProducer(producerRedisTemplate)
         consumer =
             RuleChangeConsumer(
                 snippetRepository = snippetRepository,
                 statusRepository = statusRepository,
                 snippetStore = snippetStore,
                 permissionClient = fakePermissionClient,
-                lintRequestPublisher = fakePublisher,
-                objectMapper = objectMapper,
+                lintRequestProducer = producer,
+                redisTemplate = redisTemplate,
             )
-        whenever(statusRepository.save(any<SnippetStatus>())).thenAnswer { it.arguments[0] }
     }
 
     private fun ownedSnippet(name: String): Snippet {
@@ -56,17 +70,17 @@ class RuleChangeConsumerTest {
         return snippet
     }
 
-    private fun ruleChange(
+    private fun ruleChangeEvent(
         rulesVersion: Int,
         rules: String = "{}",
-    ): MapRecord<String, String, String> =
-        MapRecord.create(
-            "lint-rules-stream",
-            mapOf("userId" to userId, "rulesVersion" to rulesVersion.toString(), "rules" to rules),
+    ): ObjectRecord<String, LintRulesChangeEvent> =
+        ObjectRecord.create(
+            "lint-rules",
+            LintRulesChangeEvent(userId = userId, rulesVersion = rulesVersion, rules = rules),
         )
 
     @Test
-    fun shouldPublishOneLintRequestPerOwnedSnippetWithContentFromStore() {
+    fun publishesOneLintRequestPerOwnedSnippetWithContentFromStore() {
         val snippet = ownedSnippet("My Snippet")
         val status = SnippetStatus(snippetId = snippet.id, status = ComplianceStatus.COMPLIANT, rulesVersion = 1)
         snippetStore.put(snippet.id, "let x = 1;")
@@ -74,31 +88,33 @@ class RuleChangeConsumerTest {
             .thenReturn(listOf(snippet))
         whenever(statusRepository.findById(snippet.id)).thenReturn(Optional.of(status))
 
-        consumer.processLintRuleChange(ruleChange(2, "{\"identifier_format\":\"camelCase\"}"))
+        consumer.onMessage(ruleChangeEvent(2, "{\"identifier_format\":\"camelCase\"}"))
 
-        assertEquals(1, fakePublisher.requests.size)
-        val request = fakePublisher.requests[0]
-        assertEquals(snippet.id, request.snippetId)
-        assertEquals("let x = 1;", request.content)
-        assertEquals(2, request.rulesVersion)
-        assertEquals("camelCase", request.rules["identifier_format"])
+        verify(streamOps).add(
+            argThat<ObjectRecord<String, LintRequestEvent>> {
+                value.snippetId == snippet.id.toString() &&
+                    value.content == "let x = 1;" &&
+                    value.rulesVersion == 2 &&
+                    value.rules == "{\"identifier_format\":\"camelCase\"}"
+            },
+        )
         assertEquals(ComplianceStatus.PENDING, status.status)
         assertEquals(2, status.rulesVersion)
     }
 
     @Test
-    fun shouldIgnoreSnippetsTheUserOnlyHasSharedAccessTo() {
+    fun ignoresSnippetsTheUserOnlyHasSharedAccessTo() {
         val shared = Snippet(name = "Shared", ownerId = "auth0|other", language = "printscript", version = "1.1")
         fakePermissionClient.setPermission(shared.id, userId, PermissionLevel.WRITE)
         whenever(snippetRepository.findAllById(argThat<Iterable<UUID>> { toList().isEmpty() })).thenReturn(emptyList())
 
-        consumer.processLintRuleChange(ruleChange(1))
+        consumer.onMessage(ruleChangeEvent(1))
 
-        assertEquals(0, fakePublisher.requests.size)
+        verify(streamOps, never()).add(any())
     }
 
     @Test
-    fun shouldMarkSnippetFailedWhenContentIsMissingAndContinueWithOthers() {
+    fun marksSnippetFailedWhenContentIsMissingAndContinuesWithOthers() {
         val orphan = ownedSnippet("Orphan")
         val healthy = ownedSnippet("Healthy")
         val orphanStatus = SnippetStatus(snippetId = orphan.id)
@@ -107,15 +123,18 @@ class RuleChangeConsumerTest {
         whenever(statusRepository.findById(orphan.id)).thenReturn(Optional.of(orphanStatus))
         whenever(statusRepository.findById(healthy.id)).thenReturn(Optional.of(SnippetStatus(snippetId = healthy.id)))
 
-        consumer.processLintRuleChange(ruleChange(3))
+        consumer.onMessage(ruleChangeEvent(3))
 
-        assertEquals(1, fakePublisher.requests.size)
-        assertEquals(healthy.id, fakePublisher.requests[0].snippetId)
+        verify(streamOps).add(
+            argThat<ObjectRecord<String, LintRequestEvent>> {
+                value.snippetId == healthy.id.toString()
+            },
+        )
         assertEquals(ComplianceStatus.FAILED, orphanStatus.status)
     }
 
     @Test
-    fun shouldTolerateFailureInOneSnippetAndContinueProcessingOthers() {
+    fun toleratesFailureInOneSnippetAndContinuesProcessingOthers() {
         val broken = ownedSnippet("Broken")
         val healthy = ownedSnippet("Healthy")
         snippetStore.put(broken.id, "code 1")
@@ -124,18 +143,64 @@ class RuleChangeConsumerTest {
         whenever(statusRepository.findById(broken.id)).thenThrow(RuntimeException("Status DB failure"))
         whenever(statusRepository.findById(healthy.id)).thenReturn(Optional.of(SnippetStatus(snippetId = healthy.id)))
 
-        consumer.processLintRuleChange(ruleChange(3))
+        consumer.onMessage(ruleChangeEvent(3))
 
-        assertEquals(1, fakePublisher.requests.size)
-        assertEquals(healthy.id, fakePublisher.requests[0].snippetId)
+        verify(streamOps).add(
+            argThat<ObjectRecord<String, LintRequestEvent>> {
+                value.snippetId == healthy.id.toString()
+            },
+        )
     }
 
     @Test
-    fun shouldIgnoreRecordWithoutUserId() {
-        val record = MapRecord.create("lint-rules-stream", mapOf("rulesVersion" to "1"))
+    fun ignoresRecordWithoutUserId() {
+        val record =
+            ObjectRecord.create(
+                "lint-rules",
+                LintRulesChangeEvent(userId = "", rulesVersion = 1),
+            )
 
-        consumer.processLintRuleChange(record)
+        consumer.onMessage(record)
 
-        assertEquals(0, fakePublisher.requests.size)
+        verify(streamOps, never()).add(any())
+    }
+
+    @Test
+    fun configuresStreamReceiverOptionsCorrectly() {
+        val options = consumer.options()
+
+        assertEquals(java.time.Duration.ofSeconds(10), options.pollTimeout)
+        assertEquals(LintRulesChangeEvent::class.java, options.targetType)
+    }
+
+    @Test
+    fun retriesFetchingContentWhenStorageFailsInitially() {
+        val snippet = ownedSnippet("Retry Snippet")
+        val status = SnippetStatus(snippetId = snippet.id)
+        val mockStore = mock<ingsis.snippet.service.store.SnippetStore>()
+        whenever(mockStore.get(snippet.id))
+            .thenThrow(RuntimeException("Glitch"))
+            .thenReturn("println(42);")
+
+        val testConsumer =
+            RuleChangeConsumer(
+                snippetRepository = snippetRepository,
+                statusRepository = statusRepository,
+                snippetStore = mockStore,
+                permissionClient = fakePermissionClient,
+                lintRequestProducer = producer,
+                redisTemplate = redisTemplate,
+            )
+        whenever(snippetRepository.findAllById(argThat<Iterable<UUID>> { toList() == listOf(snippet.id) }))
+            .thenReturn(listOf(snippet))
+        whenever(statusRepository.findById(snippet.id)).thenReturn(Optional.of(status))
+
+        testConsumer.onMessage(ruleChangeEvent(1))
+
+        verify(streamOps).add(
+            argThat<ObjectRecord<String, LintRequestEvent>> {
+                value.content == "println(42);"
+            },
+        )
     }
 }

@@ -20,6 +20,8 @@ class SnippetStatus(
     var status: ComplianceStatus = ComplianceStatus.PENDING,
     @Column(name = "rules_version", nullable = false)
     var rulesVersion: Int = 0,
+    @Column(name = "format_rules_version", nullable = false)
+    var formatRulesVersion: Int = 0,
     @Column(name = "findings_count", nullable = false)
     var findingsCount: Int = 0,
     @Column(name = "last_checked_at", nullable = false)
