@@ -7,8 +7,10 @@ import ingsis.snippet.service.client.fake.FakeRunnerClient
 import ingsis.snippet.service.controller.dto.CreateTestCaseRequest
 import ingsis.snippet.service.domain.model.Snippet
 import ingsis.snippet.service.domain.model.TestCase
+import ingsis.snippet.service.domain.model.TestCaseResult
 import ingsis.snippet.service.domain.repository.SnippetRepository
 import ingsis.snippet.service.domain.repository.TestCaseRepository
+import ingsis.snippet.service.domain.repository.TestCaseResultRepository
 import ingsis.snippet.service.store.InMemorySnippetStore
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -31,7 +33,8 @@ class TestCaseServiceTest {
     private lateinit var permissionClient: FakePermissionClient
     private lateinit var runnerClient: FakeRunnerClient
     private lateinit var snippetStore: InMemorySnippetStore
-    private lateinit var objectMapper: ObjectMapper
+    private lateinit var resultRepository: TestCaseResultRepository
+    private val objectMapper = ObjectMapper()
     private lateinit var testCaseService: TestCaseService
 
     private val ownerId = "auth0|owner"
@@ -55,15 +58,18 @@ class TestCaseServiceTest {
         runnerClient = FakeRunnerClient()
         snippetStore = InMemorySnippetStore()
         snippetStore.put(snippetId, "println(10);")
-        objectMapper = ObjectMapper()
+        resultRepository = mock()
+        whenever(resultRepository.save(any<TestCaseResult>())).thenAnswer { it.arguments[0] }
+        whenever(resultRepository.findById(any())).thenReturn(Optional.empty())
+        val codec = TestCaseCodec(objectMapper)
         testCaseService =
             TestCaseService(
                 testCaseRepository = testCaseRepository,
                 snippetRepository = snippetRepository,
                 permissionClient = permissionClient,
-                runnerClient = runnerClient,
                 snippetStore = snippetStore,
-                objectMapper = objectMapper,
+                codec = codec,
+                testRunner = SnippetTestRunner(testCaseRepository, resultRepository, runnerClient, codec),
             )
 
         permissionClient.setPermission(snippetId, ownerId, PermissionLevel.OWNER)

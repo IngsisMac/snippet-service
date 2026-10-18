@@ -61,6 +61,7 @@ class RuleChangeConsumerTest {
                 permissionClient = fakePermissionClient,
                 lintRequestProducer = producer,
                 redisTemplate = redisTemplate,
+                work = StreamWorkQueue.direct("lint-rules"),
             )
     }
 
@@ -190,6 +191,7 @@ class RuleChangeConsumerTest {
                 permissionClient = fakePermissionClient,
                 lintRequestProducer = producer,
                 redisTemplate = redisTemplate,
+                work = StreamWorkQueue.direct("lint-rules"),
             )
         whenever(snippetRepository.findAllById(argThat<Iterable<UUID>> { toList() == listOf(snippet.id) }))
             .thenReturn(listOf(snippet))

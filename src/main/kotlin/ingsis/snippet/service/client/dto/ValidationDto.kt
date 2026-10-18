@@ -35,10 +35,14 @@ data class FormatSnippetClientResponse(
     val formattedContent: String,
 )
 
+/**
+ * Los defaults le dan un constructor sin argumentos: estos hallazgos se guardan serializados en
+ * `snippet_statuses.findings` y se releen al mostrar el detalle del snippet.
+ */
 data class LintFindingClientDto(
-    val message: String,
-    val line: Int,
-    val column: Int,
+    val message: String = "",
+    val line: Int = 0,
+    val column: Int = 0,
 )
 
 data class LintSnippetClientRequest(

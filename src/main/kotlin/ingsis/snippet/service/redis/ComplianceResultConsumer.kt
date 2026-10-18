@@ -2,6 +2,7 @@ package ingsis.snippet.service.redis
 
 import ingsis.snippet.redis.event.ComplianceResultEvent
 import ingsis.snippet.service.domain.model.ComplianceStatus
+import ingsis.snippet.service.domain.model.LintFindingsCodec
 import ingsis.snippet.service.domain.model.SnippetStatus
 import ingsis.snippet.service.domain.repository.SnippetStatusRepository
 import org.austral.ingsis.redis.RedisStreamConsumer
@@ -11,7 +12,7 @@ import org.springframework.data.redis.connection.stream.ObjectRecord
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.data.redis.stream.StreamReceiver.StreamReceiverOptions
 import org.springframework.stereotype.Component
-import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -21,6 +22,8 @@ import java.util.UUID
 class ComplianceResultConsumer(
     private val statusRepository: SnippetStatusRepository,
     redisTemplate: RedisTemplate<String, String>,
+    transactions: TransactionTemplate,
+    private val work: StreamWorkQueue = StreamWorkQueue("lint-result", transactions),
 ) : RedisStreamConsumer<ComplianceResultEvent>(
         streamKey = "lint-result",
         groupId = "snippet-compliance-group",
@@ -35,34 +38,36 @@ class ComplianceResultConsumer(
             .targetType(ComplianceResultEvent::class.java)
             .build()
 
-    @Transactional
-    @Suppress("TooGenericExceptionCaught")
     public override fun onMessage(record: ObjectRecord<String, ComplianceResultEvent>) {
-        try {
-            val event = record.value
-            val snippetId = parseSnippetId(event.snippetId) ?: return
+        work.submit { applyResult(record.value) }
+    }
 
-            val current = statusRepository.findById(snippetId).orElse(SnippetStatus(snippetId = snippetId))
+    private fun applyResult(event: ComplianceResultEvent) {
+        val snippetId = parseSnippetId(event.snippetId) ?: return
+        val current = statusRepository.findById(snippetId).orElse(SnippetStatus(snippetId = snippetId))
+        if (isObsolete(event, current)) return
 
-            if (event.rulesVersion < current.rulesVersion) {
-                logger.warn(
-                    "Discarding obsolete result v{} for snippet {} (current v{})",
-                    event.rulesVersion,
-                    event.snippetId,
-                    current.rulesVersion,
-                )
-                return
-            }
+        current.rulesVersion = event.rulesVersion
+        current.status = parseStatus(event.status)
+        current.findingsCount = event.findingsCount
+        current.findings = event.findings.ifBlank { LintFindingsCodec.EMPTY }
+        current.lastCheckedAt = Instant.now()
+        statusRepository.save(current)
+        logger.info("Updated compliance status for snippet {} to {}", current.snippetId, current.status)
+    }
 
-            current.rulesVersion = event.rulesVersion
-            current.status = parseStatus(event.status)
-            current.findingsCount = event.findingsCount
-            current.lastCheckedAt = Instant.now()
-            statusRepository.save(current)
-            logger.info("Updated compliance status for snippet {} to {}", current.snippetId, current.status)
-        } catch (t: Throwable) {
-            logger.error("Unhandled error processing lint-result record", t)
-        }
+    private fun isObsolete(
+        event: ComplianceResultEvent,
+        current: SnippetStatus,
+    ): Boolean {
+        if (event.rulesVersion >= current.rulesVersion) return false
+        logger.warn(
+            "Discarding obsolete result v{} for snippet {} (current v{})",
+            event.rulesVersion,
+            event.snippetId,
+            current.rulesVersion,
+        )
+        return true
     }
 
     private fun parseSnippetId(idStr: String?): UUID? =

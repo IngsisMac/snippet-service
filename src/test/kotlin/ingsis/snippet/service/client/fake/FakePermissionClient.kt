@@ -3,6 +3,7 @@ package ingsis.snippet.service.client.fake
 import ingsis.snippet.service.client.PermissionClient
 import ingsis.snippet.service.client.dto.PermissionLevel
 import ingsis.snippet.service.client.dto.UserPermissionResponse
+import ingsis.snippet.service.client.dto.UserRulesResponse
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -31,14 +32,16 @@ class FakePermissionClient : PermissionClient {
         snippetMap[userId] = level
     }
 
-    private val lintRules = ConcurrentHashMap<String, Map<String, Any>>()
+    private val lintRules = ConcurrentHashMap<String, UserRulesResponse>()
     private val formatRules = ConcurrentHashMap<String, Map<String, Any>>()
+    var lintRulesFailure: RuntimeException? = null
 
     fun setLintRules(
         userId: String,
         rules: Map<String, Any>,
+        rulesVersion: Int = 1,
     ) {
-        lintRules[userId] = rules
+        lintRules[userId] = UserRulesResponse(userId = userId, rulesVersion = rulesVersion, rules = rules)
     }
 
     fun setFormatRules(
@@ -48,7 +51,10 @@ class FakePermissionClient : PermissionClient {
         formatRules[userId] = rules
     }
 
-    override fun getLintRules(userId: String): Map<String, Any> = lintRules[userId] ?: emptyMap()
+    override fun getLintRuleSet(userId: String): UserRulesResponse {
+        lintRulesFailure?.let { throw it }
+        return lintRules[userId] ?: UserRulesResponse(userId = userId, rulesVersion = 0)
+    }
 
     override fun getFormatRules(userId: String): Map<String, Any> = formatRules[userId] ?: emptyMap()
 

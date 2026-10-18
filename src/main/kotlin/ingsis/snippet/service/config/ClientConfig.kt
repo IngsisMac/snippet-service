@@ -2,8 +2,10 @@ package ingsis.snippet.service.config
 
 import ingsis.snippet.service.client.HttpPermissionClient
 import ingsis.snippet.service.client.HttpRunnerClient
+import ingsis.snippet.service.client.HttpRunnerExecutionClient
 import ingsis.snippet.service.client.PermissionClient
 import ingsis.snippet.service.client.RunnerClient
+import ingsis.snippet.service.client.RunnerExecutionClient
 import ingsis.snippet.service.client.auth.Auth0ClientCredentialsTokenProvider
 import ingsis.snippet.service.client.auth.BearerTokenInterceptor
 import ingsis.snippet.service.client.auth.M2mProperties
@@ -43,6 +45,22 @@ class ClientConfig {
         tokenProvider: ServiceTokenProvider,
         builder: RestClient.Builder,
     ): RunnerClient = HttpRunnerClient(restClientFor(properties.runner, builder, BearerTokenInterceptor(tokenProvider)))
+
+    /**
+     * El stream de una ejecución interactiva puede quedar abierto minutos esperando que una
+     * persona escriba, así que usa su propio `read-timeout`. El corte real no lo pone este
+     * cliente sino el watchdog del runner: acá solo hace falta no cortar antes que él.
+     */
+    @Bean
+    fun runnerExecutionClient(
+        properties: ServicesProperties,
+        tokenProvider: ServiceTokenProvider,
+        builder: RestClient.Builder,
+    ): RunnerExecutionClient =
+        HttpRunnerExecutionClient(
+            restClientFor(properties.runner, builder, BearerTokenInterceptor(tokenProvider)),
+            restClientFor(properties.runner.streaming(), builder, BearerTokenInterceptor(tokenProvider)),
+        )
 
     @Bean
     fun permissionClient(
@@ -84,9 +102,14 @@ data class ServiceTarget(
     val url: String,
     val connectTimeout: Duration = DEFAULT_CONNECT_TIMEOUT,
     val readTimeout: Duration = DEFAULT_READ_TIMEOUT,
+    /** Solo lo usa el stream de ejecución del runner; el resto de las llamadas usa `readTimeout`. */
+    val streamReadTimeout: Duration = DEFAULT_STREAM_READ_TIMEOUT,
 ) {
+    fun streaming(): ServiceTarget = copy(readTimeout = streamReadTimeout)
+
     companion object {
         val DEFAULT_CONNECT_TIMEOUT: Duration = Duration.ofSeconds(2)
         val DEFAULT_READ_TIMEOUT: Duration = Duration.ofSeconds(3)
+        val DEFAULT_STREAM_READ_TIMEOUT: Duration = Duration.ofMinutes(5)
     }
 }

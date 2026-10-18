@@ -1,14 +1,13 @@
 package ingsis.snippet.service.service
 
-import com.fasterxml.jackson.core.type.TypeReference
-import com.fasterxml.jackson.databind.ObjectMapper
 import ingsis.snippet.service.client.PermissionClient
-import ingsis.snippet.service.client.RunnerClient
 import ingsis.snippet.service.client.dto.PermissionLevel
 import ingsis.snippet.service.controller.dto.CreateTestCaseRequest
 import ingsis.snippet.service.controller.dto.TestCaseExecutionResponse
 import ingsis.snippet.service.controller.dto.TestCaseResponse
+import ingsis.snippet.service.controller.dto.TestRunResponse
 import ingsis.snippet.service.domain.model.TestCase
+import ingsis.snippet.service.domain.model.TestCaseResult
 import ingsis.snippet.service.domain.repository.SnippetRepository
 import ingsis.snippet.service.domain.repository.TestCaseRepository
 import ingsis.snippet.service.store.SnippetStore
@@ -23,9 +22,9 @@ class TestCaseService(
     private val testCaseRepository: TestCaseRepository,
     private val snippetRepository: SnippetRepository,
     private val permissionClient: PermissionClient,
-    private val runnerClient: RunnerClient,
     private val snippetStore: SnippetStore,
-    private val objectMapper: ObjectMapper,
+    private val codec: TestCaseCodec,
+    private val testRunner: SnippetTestRunner,
 ) {
     @Transactional
     fun createTestCase(
@@ -42,9 +41,9 @@ class TestCaseService(
             TestCase(
                 snippetId = snippetId,
                 name = request.name,
-                inputs = objectMapper.writeValueAsString(request.inputs),
-                expectedOutputs = objectMapper.writeValueAsString(request.expectedOutputs),
-                env = request.env?.let { objectMapper.writeValueAsString(it) },
+                inputs = codec.encode(request.inputs),
+                expectedOutputs = codec.encode(request.expectedOutputs),
+                env = request.env?.let { codec.encodeEnv(it) },
             )
         val saved = testCaseRepository.save(testCase)
         return mapToResponse(saved)
@@ -59,7 +58,8 @@ class TestCaseService(
         if (!snippetRepository.existsById(snippetId)) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found")
         }
-        return testCaseRepository.findAllBySnippetId(snippetId).map { mapToResponse(it) }
+        val resultsByTestCase = testRunner.resultsOf(snippetId)
+        return testCaseRepository.findAllBySnippetId(snippetId).map { mapToResponse(it, resultsByTestCase[it.id]) }
     }
 
     @Transactional
@@ -75,9 +75,9 @@ class TestCaseService(
                 .findBySnippetIdAndId(snippetId, testCaseId)
                 .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "Test case not found") }
         testCase.name = request.name
-        testCase.inputs = objectMapper.writeValueAsString(request.inputs)
-        testCase.expectedOutputs = objectMapper.writeValueAsString(request.expectedOutputs)
-        testCase.env = request.env?.let { objectMapper.writeValueAsString(it) }
+        testCase.inputs = codec.encode(request.inputs)
+        testCase.expectedOutputs = codec.encode(request.expectedOutputs)
+        testCase.env = request.env?.let { codec.encodeEnv(it) }
         return mapToResponse(testCaseRepository.save(testCase))
     }
 
@@ -94,7 +94,7 @@ class TestCaseService(
         testCaseRepository.deleteBySnippetIdAndId(snippetId, testCaseId)
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     fun runTestCase(
         snippetId: UUID,
         testCaseId: UUID,
@@ -110,10 +110,10 @@ class TestCaseService(
                 .findBySnippetIdAndId(snippetId, testCaseId)
                 .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "Test case not found") }
 
-        return executeSingleTest(loadContent(snippetId), snippet.version, testCase)
+        return testRunner.runNow(snippetId, loadContent(snippetId), snippet.version, testCase)
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     fun runAllTestCases(
         snippetId: UUID,
         userId: String,
@@ -125,31 +125,12 @@ class TestCaseService(
                 .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet not found") }
         val content = loadContent(snippetId)
         val testCases = testCaseRepository.findAllBySnippetId(snippetId)
-        return testCases.map { executeSingleTest(content, snippet.version, it) }
+        return testCases.map { testRunner.runNow(snippetId, content, snippet.version, it) }
     }
 
     private fun loadContent(snippetId: UUID): String =
         snippetStore.get(snippetId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet content not found in storage")
-
-    private fun executeSingleTest(
-        content: String,
-        version: String,
-        testCase: TestCase,
-    ): TestCaseExecutionResponse {
-        val inputs = parseList(testCase.inputs)
-        val expectedOutputs = parseList(testCase.expectedOutputs)
-        val env = parseMap(testCase.env)
-        val result = runnerClient.runTest(content, version, inputs, expectedOutputs, env)
-        return TestCaseExecutionResponse(
-            testCaseId = testCase.id,
-            name = testCase.name,
-            passed = result.passed,
-            actualOutputs = result.actualOutputs,
-            expectedOutputs = result.expectedOutputs,
-            errors = result.errors,
-        )
-    }
 
     private fun assertCanWrite(
         snippetId: UUID,
@@ -171,29 +152,19 @@ class TestCaseService(
         }
     }
 
-    private fun mapToResponse(testCase: TestCase): TestCaseResponse =
-        TestCaseResponse(
+    private fun mapToResponse(
+        testCase: TestCase,
+        result: TestCaseResult? = null,
+    ): TestCaseResponse {
+        val payload = codec.payloadOf(testCase)
+        return TestCaseResponse(
             id = testCase.id,
             snippetId = testCase.snippetId,
             name = testCase.name,
-            inputs = parseList(testCase.inputs),
-            expectedOutputs = parseList(testCase.expectedOutputs),
-            env = parseMap(testCase.env),
+            inputs = payload.inputs,
+            expectedOutputs = payload.expectedOutputs,
+            env = payload.env,
+            lastRun = result?.let { TestRunResponse.from(it, codec::decodeList) },
         )
-
-    private fun parseList(json: String): List<String> =
-        try {
-            objectMapper.readValue(json, object : TypeReference<List<String>>() {})
-        } catch (_: Exception) {
-            emptyList()
-        }
-
-    private fun parseMap(json: String?): Map<String, String>? =
-        json?.let {
-            try {
-                objectMapper.readValue(it, object : TypeReference<Map<String, String>>() {})
-            } catch (_: Exception) {
-                null
-            }
-        }
+    }
 }

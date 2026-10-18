@@ -56,6 +56,7 @@ class FormatRuleChangeConsumerTest {
                 permissionClient = fakePermissionClient,
                 formatRequestProducer = producer,
                 redisTemplate = redisTemplate,
+                work = StreamWorkQueue.direct("format-rules"),
             )
     }
 
@@ -156,6 +157,7 @@ class FormatRuleChangeConsumerTest {
                 permissionClient = fakePermissionClient,
                 formatRequestProducer = producer,
                 redisTemplate = redisTemplate,
+                work = StreamWorkQueue.direct("format-rules"),
             )
         whenever(snippetRepository.findAllById(argThat<Iterable<UUID>> { toList() == listOf(snippet.id) }))
             .thenReturn(listOf(snippet))
@@ -182,6 +184,7 @@ class FormatRuleChangeConsumerTest {
                 permissionClient = fakePermissionClient,
                 formatRequestProducer = producer,
                 redisTemplate = redisTemplate,
+                work = StreamWorkQueue.direct("format-rules"),
             )
         whenever(snippetRepository.findAllById(argThat<Iterable<UUID>> { toList() == listOf(snippet.id) }))
             .thenReturn(listOf(snippet))
@@ -216,6 +219,7 @@ class FormatRuleChangeConsumerTest {
                 permissionClient = fakePermissionClient,
                 formatRequestProducer = producer,
                 redisTemplate = redisTemplate,
+                work = StreamWorkQueue.direct("format-rules"),
             )
 
         testConsumer.onMessage(formatRuleChangeEvent(1))

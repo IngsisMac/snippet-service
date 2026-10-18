@@ -45,13 +45,7 @@ class SnippetServiceTest {
         fakeRunnerClient = FakeRunnerClient()
         fakePermissionClient = FakePermissionClient()
         snippetStore = InMemorySnippetStore()
-        snippetTestRunner =
-            SnippetTestRunner(
-                testCaseRepository,
-                fakeRunnerClient,
-                com.fasterxml.jackson.databind
-                    .ObjectMapper()
-            )
+        snippetTestRunner = testRunnerOver(fakeRunnerClient)
         snippetService =
             SnippetService(
                 snippetRepository = snippetRepository,
@@ -62,6 +56,17 @@ class SnippetServiceTest {
                 snippetTestRunner = snippetTestRunner,
             )
     }
+
+    private fun testRunnerOver(runnerClient: ingsis.snippet.service.client.RunnerClient): SnippetTestRunner =
+        SnippetTestRunner(
+            testCaseRepository,
+            mock(),
+            runnerClient,
+            TestCaseCodec(
+                com.fasterxml.jackson.databind
+                    .ObjectMapper(),
+            ),
+        )
 
     @Test
     fun shouldCreateSnippetSuccessfullyAndAssignOwner() {

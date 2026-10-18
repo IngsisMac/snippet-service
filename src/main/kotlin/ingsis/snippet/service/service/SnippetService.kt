@@ -2,18 +2,22 @@ package ingsis.snippet.service.service
 
 import ingsis.snippet.service.client.PermissionClient
 import ingsis.snippet.service.client.RunnerClient
+import ingsis.snippet.service.client.dto.LintFindingClientDto
 import ingsis.snippet.service.client.dto.PermissionLevel
 import ingsis.snippet.service.controller.dto.CreateSnippetRequest
 import ingsis.snippet.service.controller.dto.LintReportResponse
 import ingsis.snippet.service.controller.dto.SnippetResponse
 import ingsis.snippet.service.controller.dto.UpdateSnippetRequest
 import ingsis.snippet.service.domain.model.ComplianceStatus
+import ingsis.snippet.service.domain.model.LintFindingsCodec
 import ingsis.snippet.service.domain.model.Snippet
 import ingsis.snippet.service.domain.model.SnippetScope
 import ingsis.snippet.service.domain.model.SnippetStatus
+import ingsis.snippet.service.domain.repository.SnippetListingSort
 import ingsis.snippet.service.domain.repository.SnippetRepository
 import ingsis.snippet.service.domain.repository.SnippetStatusRepository
 import ingsis.snippet.service.store.SnippetStore
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
@@ -40,7 +44,10 @@ class SnippetService(
     private val runnerClient: RunnerClient,
     private val permissionClient: PermissionClient,
     private val snippetStore: SnippetStore,
+    private val findingsCodec: LintFindingsCodec = LintFindingsCodec(),
     private val snippetTestRunner: SnippetTestRunner? = null,
+    private val eventPublisher: ApplicationEventPublisher? = null,
+    private val access: SnippetAccess = SnippetAccess(permissionClient),
 ) {
     @Transactional
     fun createSnippet(
@@ -55,21 +62,20 @@ class SnippetService(
                 ownerId = ownerId,
                 language = request.language,
                 version = request.version,
+                description = request.description,
             )
         val savedSnippet = snippetRepository.save(snippet)
         snippetStore.put(savedSnippet.id, request.content)
 
-        val status =
-            SnippetStatus(
-                snippetId = savedSnippet.id,
-                status = ComplianceStatus.PENDING,
-                rulesVersion = 0,
-                findingsCount = 0,
-                lastCheckedAt = Instant.now(),
-            )
-        val savedStatus = statusRepository.save(status)
+        val savedStatus = statusRepository.save(initialStatusFor(savedSnippet.id))
 
         permissionClient.assignOwner(savedSnippet.id, ownerId)
+
+        // Un snippet nuevo nace PENDING y nadie lo lintearía hasta el próximo cambio de reglas:
+        // el evento (entregado después del commit) pide su linteo con las reglas actuales.
+        eventPublisher?.publishEvent(
+            SnippetContentChangedEvent(savedSnippet.id, request.content, savedSnippet.version, ownerId),
+        )
 
         return mapToResponse(savedSnippet, savedStatus, request.content)
     }
@@ -80,9 +86,9 @@ class SnippetService(
         userId: String,
     ): SnippetResponse {
         val snippet = findSnippet(id)
-        assertCanView(snippet, userId)
+        access.requireView(snippet.id, userId)
         val status = statusRepository.findById(id).orElse(SnippetStatus(snippetId = id))
-        return mapToResponse(snippet, status, snippetStore.get(id))
+        return mapToResponse(snippet, status, snippetStore.get(id), findingsCodec.decode(status.findings))
     }
 
     @Transactional(readOnly = true)
@@ -91,7 +97,7 @@ class SnippetService(
         userId: String,
     ): String {
         val snippet = findSnippet(id)
-        assertCanView(snippet, userId)
+        access.requireView(snippet.id, userId)
         return loadContent(id)
     }
 
@@ -102,7 +108,7 @@ class SnippetService(
         content: String? = null,
     ): String {
         val snippet = findSnippet(id)
-        assertCanView(snippet, userId)
+        access.requireView(snippet.id, userId)
         val rules = permissionClient.getFormatRules(userId)
         return runnerClient.format(content ?: loadContent(id), snippet.version, rules)
     }
@@ -113,10 +119,10 @@ class SnippetService(
         userId: String,
     ): LintReportResponse {
         val snippet = findSnippet(id)
-        assertCanView(snippet, userId)
+        access.requireView(snippet.id, userId)
         val rules = permissionClient.getLintRules(userId)
         val result = runnerClient.lint(loadContent(id), snippet.version, rules)
-        val complianceStatus = updateLintComplianceStatus(id, result.findingsCount)
+        val complianceStatus = updateLintComplianceStatus(id, result.findingsCount, result.findings)
 
         return LintReportResponse(
             snippetId = id,
@@ -129,10 +135,12 @@ class SnippetService(
     private fun updateLintComplianceStatus(
         snippetId: UUID,
         findingsCount: Int,
+        findings: List<LintFindingClientDto>,
     ): ComplianceStatus {
         val status = statusRepository.findById(snippetId).orElse(SnippetStatus(snippetId = snippetId))
         status.status = if (findingsCount == 0) ComplianceStatus.COMPLIANT else ComplianceStatus.NOT_COMPLIANT
         status.findingsCount = findingsCount
+        status.findings = findingsCodec.encode(findings)
         status.lastCheckedAt = Instant.now()
         return statusRepository.save(status).status
     }
@@ -155,7 +163,14 @@ class SnippetService(
         if (accessibleIds.isEmpty()) {
             return PageImpl(emptyList(), pageable, 0)
         }
-        val page = snippetRepository.findAllByIdsAndFilters(accessibleIds, name, language, status, pageable)
+        val page =
+            snippetRepository.findAllByIdsAndFilters(
+                accessibleIds,
+                name,
+                language,
+                status,
+                SnippetListingSort.resolve(pageable),
+            )
         return enrichSnippetResponses(page)
     }
 
@@ -204,9 +219,10 @@ class SnippetService(
         request: UpdateSnippetRequest,
     ): SnippetResponse {
         val snippet = findSnippet(id)
-        assertCanEdit(snippet, userId)
+        access.requireEdit(snippet.id, userId)
 
         request.name?.let { snippet.name = it }
+        request.description?.let { snippet.description = it }
         val currentContent = snippetStore.get(id)
         request.content?.let { newContent ->
             if (newContent != currentContent) {
@@ -217,7 +233,7 @@ class SnippetService(
         val updated = snippetRepository.save(snippet)
 
         val status = statusRepository.findById(id).orElse(SnippetStatus(snippetId = id))
-        return mapToResponse(updated, status, request.content ?: currentContent)
+        return mapToResponse(updated, status, request.content ?: currentContent, findingsCodec.decode(status.findings))
     }
 
     @Transactional
@@ -226,10 +242,19 @@ class SnippetService(
         userId: String,
     ) {
         val snippet = findSnippet(id)
-        assertIsOwner(snippet, userId)
+        access.requireOwner(snippet.id, userId)
         snippetRepository.delete(snippet)
         snippetStore.delete(id)
     }
+
+    private fun initialStatusFor(snippetId: UUID): SnippetStatus =
+        SnippetStatus(
+            snippetId = snippetId,
+            status = ComplianceStatus.PENDING,
+            rulesVersion = 0,
+            findingsCount = 0,
+            lastCheckedAt = Instant.now(),
+        )
 
     private fun findSnippet(id: UUID): Snippet =
         snippetRepository.findById(id).orElseThrow {
@@ -240,37 +265,6 @@ class SnippetService(
         snippetStore.get(id)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Snippet content not found in storage")
 
-    private fun assertCanEdit(
-        snippet: Snippet,
-        userId: String,
-    ) {
-        val permission = permissionClient.getPermission(snippet.id, userId)
-        val canEdit = permission == PermissionLevel.OWNER || permission == PermissionLevel.WRITE
-        if (!canEdit) {
-            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to edit this snippet")
-        }
-    }
-
-    private fun assertIsOwner(
-        snippet: Snippet,
-        userId: String,
-    ) {
-        val permission = permissionClient.getPermission(snippet.id, userId)
-        if (permission != PermissionLevel.OWNER) {
-            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Only the owner can delete this snippet")
-        }
-    }
-
-    private fun assertCanView(
-        snippet: Snippet,
-        userId: String,
-    ) {
-        val permission = permissionClient.getPermission(snippet.id, userId)
-        if (permission == PermissionLevel.NONE) {
-            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to view this snippet")
-        }
-    }
-
     private fun applyContentUpdate(
         snippet: Snippet,
         newContent: String,
@@ -279,8 +273,18 @@ class SnippetService(
         snippetStore.put(snippet.id, newContent)
         val status = statusRepository.findById(snippet.id).orElse(SnippetStatus(snippetId = snippet.id))
         status.status = ComplianceStatus.PENDING
+        status.findingsCount = 0
+        status.findings = LintFindingsCodec.EMPTY
         statusRepository.save(status)
-        snippetTestRunner?.runTestsQuietly(snippet.id, newContent, snippet.version)
+
+        // Los test cases quedan en PENDING acá y la corrida arranca cuando commitea esta
+        // transacción (ver SnippetTestRunner.onSnippetContentChanged): así el usuario ve el estado
+        // correcto apenas guarda, y nunca se guardan resultados de un update que se descartó. El
+        // mismo evento dispara el pedido de linteo del contenido nuevo (SnippetLintRequester).
+        snippetTestRunner?.markPending(snippet.id)
+        eventPublisher?.publishEvent(
+            SnippetContentChangedEvent(snippet.id, newContent, snippet.version, snippet.ownerId),
+        )
     }
 
     private fun validateSnippetSyntax(
@@ -304,6 +308,7 @@ class SnippetService(
         snippet: Snippet,
         status: SnippetStatus,
         content: String?,
+        findings: List<LintFindingClientDto>? = null,
     ): SnippetResponse =
         SnippetResponse(
             id = snippet.id,
@@ -311,10 +316,12 @@ class SnippetService(
             ownerId = snippet.ownerId,
             language = snippet.language,
             version = snippet.version,
+            description = snippet.description,
             content = content,
             status = status.status,
             rulesVersion = status.rulesVersion,
             findingsCount = status.findingsCount,
+            findings = findings,
             createdAt = snippet.createdAt,
             updatedAt = snippet.updatedAt,
         )

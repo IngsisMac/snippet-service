@@ -26,7 +26,13 @@ class ComplianceResultConsumerTest {
     fun setUp() {
         statusRepository = mock()
         redisTemplate = mock()
-        consumer = ComplianceResultConsumer(statusRepository, redisTemplate)
+        consumer =
+            ComplianceResultConsumer(
+                statusRepository,
+                redisTemplate,
+                mock(),
+                StreamWorkQueue.direct("lint-result"),
+            )
     }
 
     @Test
@@ -50,6 +56,49 @@ class ComplianceResultConsumerTest {
         assertEquals(3, current.rulesVersion)
         assertEquals(ComplianceStatus.COMPLIANT, current.status)
         verify(statusRepository).save(current)
+    }
+
+    @Test
+    fun storesTheFindingsCarriedByTheResultSoTheDetailCanShowThem() {
+        val snippetId = UUID.randomUUID()
+        val current = SnippetStatus(snippetId = snippetId, rulesVersion = 1)
+        val findings = """[{"message":"Identifier is not in camel case","line":1,"column":5}]"""
+        whenever(statusRepository.findById(snippetId)).thenReturn(Optional.of(current))
+        whenever(statusRepository.save(any<SnippetStatus>())).thenAnswer { it.arguments[0] }
+
+        val event =
+            ComplianceResultEvent(
+                snippetId = snippetId.toString(),
+                rulesVersion = 2,
+                status = "NOT_COMPLIANT",
+                findingsCount = 1,
+                findings = findings,
+            )
+
+        consumer.onMessage(ObjectRecord.create("lint-result", event))
+
+        assertEquals(findings, current.findings)
+        assertEquals(1, current.findingsCount)
+    }
+
+    @Test
+    fun keepsAnEmptyListWhenTheResultCarriesNoFindings() {
+        val snippetId = UUID.randomUUID()
+        val current = SnippetStatus(snippetId = snippetId, findings = """[{"message":"old"}]""")
+        whenever(statusRepository.findById(snippetId)).thenReturn(Optional.of(current))
+        whenever(statusRepository.save(any<SnippetStatus>())).thenAnswer { it.arguments[0] }
+
+        val event =
+            ComplianceResultEvent(
+                snippetId = snippetId.toString(),
+                rulesVersion = 1,
+                status = "COMPLIANT",
+                findings = "",
+            )
+
+        consumer.onMessage(ObjectRecord.create("lint-result", event))
+
+        assertEquals("[]", current.findings)
     }
 
     @Test

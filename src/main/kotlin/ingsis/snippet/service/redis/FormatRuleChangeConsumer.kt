@@ -14,7 +14,6 @@ import org.springframework.data.redis.connection.stream.ObjectRecord
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.data.redis.stream.StreamReceiver.StreamReceiverOptions
 import org.springframework.stereotype.Component
-import org.springframework.transaction.annotation.Transactional
 import java.time.Duration
 import java.util.UUID
 
@@ -26,6 +25,7 @@ class FormatRuleChangeConsumer(
     private val permissionClient: PermissionClient,
     private val formatRequestProducer: FormatRequestProducer,
     redisTemplate: RedisTemplate<String, String>,
+    private val work: StreamWorkQueue = StreamWorkQueue("format-rules"),
 ) : RedisStreamConsumer<FormatRulesChangeEvent>(
         streamKey = "format-rules",
         groupId = "snippet-format-rules-group",
@@ -40,14 +40,8 @@ class FormatRuleChangeConsumer(
             .targetType(FormatRulesChangeEvent::class.java)
             .build()
 
-    @Transactional
-    @Suppress("TooGenericExceptionCaught")
     public override fun onMessage(record: ObjectRecord<String, FormatRulesChangeEvent>) {
-        try {
-            handleFormatRuleChange(record.value)
-        } catch (t: Throwable) {
-            logger.error("Unhandled error processing format-rules record", t)
-        }
+        work.submit { handleFormatRuleChange(record.value) }
     }
 
     private fun handleFormatRuleChange(event: FormatRulesChangeEvent) {

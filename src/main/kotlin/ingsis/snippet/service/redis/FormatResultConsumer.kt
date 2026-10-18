@@ -11,7 +11,7 @@ import org.springframework.data.redis.connection.stream.ObjectRecord
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.data.redis.stream.StreamReceiver.StreamReceiverOptions
 import org.springframework.stereotype.Component
-import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -22,6 +22,8 @@ class FormatResultConsumer(
     private val statusRepository: SnippetStatusRepository,
     private val snippetStore: SnippetStore,
     redisTemplate: RedisTemplate<String, String>,
+    transactions: TransactionTemplate,
+    private val work: StreamWorkQueue = StreamWorkQueue("format-result", transactions),
 ) : RedisStreamConsumer<FormatResultEvent>(
         streamKey = "format-result",
         groupId = "snippet-format-result-group",
@@ -36,14 +38,8 @@ class FormatResultConsumer(
             .targetType(FormatResultEvent::class.java)
             .build()
 
-    @Transactional
-    @Suppress("TooGenericExceptionCaught")
     public override fun onMessage(record: ObjectRecord<String, FormatResultEvent>) {
-        try {
-            processFormatResult(record.value)
-        } catch (t: Throwable) {
-            logger.error("Unhandled error processing format-result record", t)
-        }
+        work.submit { processFormatResult(record.value) }
     }
 
     private fun processFormatResult(event: FormatResultEvent) {

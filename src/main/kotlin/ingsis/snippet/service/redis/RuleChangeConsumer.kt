@@ -17,7 +17,6 @@ import org.springframework.data.redis.connection.stream.ObjectRecord
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.data.redis.stream.StreamReceiver.StreamReceiverOptions
 import org.springframework.stereotype.Component
-import org.springframework.transaction.annotation.Transactional
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -31,6 +30,7 @@ class RuleChangeConsumer(
     private val permissionClient: PermissionClient,
     private val lintRequestProducer: LintRequestProducer,
     redisTemplate: RedisTemplate<String, String>,
+    private val work: StreamWorkQueue = StreamWorkQueue("lint-rules"),
 ) : RedisStreamConsumer<LintRulesChangeEvent>(
         streamKey = "lint-rules",
         groupId = "snippet-lint-rules-group",
@@ -45,14 +45,8 @@ class RuleChangeConsumer(
             .targetType(LintRulesChangeEvent::class.java)
             .build()
 
-    @Transactional
-    @Suppress("TooGenericExceptionCaught")
     public override fun onMessage(record: ObjectRecord<String, LintRulesChangeEvent>) {
-        try {
-            handleRuleChange(record.value)
-        } catch (t: Throwable) {
-            logger.error("Unhandled error processing lint-rules record", t)
-        }
+        work.submit { handleRuleChange(record.value) }
     }
 
     private fun handleRuleChange(event: LintRulesChangeEvent) {

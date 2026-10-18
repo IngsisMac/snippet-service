@@ -25,8 +25,14 @@ class Snippet(
     var language: String,
     @Column(nullable = false)
     var version: String,
+    @Column(length = DESCRIPTION_MAX_LENGTH)
+    var description: String? = null,
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
     @Column(name = "updated_at", nullable = false)
     var updatedAt: Instant = Instant.now(),
-)
+) {
+    companion object {
+        const val DESCRIPTION_MAX_LENGTH = 1000
+    }
+}

@@ -50,15 +50,13 @@ class HttpPermissionClient(
         }
     }
 
-    override fun getLintRules(userId: String): Map<String, Any> {
-        val response =
-            restClient
-                .get()
-                .uri("/internal/rules/lint/{userId}", userId)
-                .retrieve()
-                .body(UserRulesResponse::class.java)
-        return response?.rules ?: emptyMap()
-    }
+    override fun getLintRuleSet(userId: String): UserRulesResponse =
+        restClient
+            .get()
+            .uri("/internal/rules/lint/{userId}", userId)
+            .retrieve()
+            .body(UserRulesResponse::class.java)
+            ?: UserRulesResponse(userId = userId, rulesVersion = 0)
 
     override fun getFormatRules(userId: String): Map<String, Any> {
         val response =

@@ -28,7 +28,14 @@ class FormatResultConsumerTest {
         statusRepository = mock()
         snippetStore = InMemorySnippetStore()
         redisTemplate = mock()
-        consumer = FormatResultConsumer(statusRepository, snippetStore, redisTemplate)
+        consumer =
+            FormatResultConsumer(
+                statusRepository,
+                snippetStore,
+                redisTemplate,
+                mock(),
+                StreamWorkQueue.direct("format-result"),
+            )
     }
 
     @Test
