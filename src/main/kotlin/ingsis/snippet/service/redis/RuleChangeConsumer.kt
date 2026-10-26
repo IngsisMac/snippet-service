@@ -46,7 +46,16 @@ class RuleChangeConsumer(
             .build()
 
     public override fun onMessage(record: ObjectRecord<String, LintRulesChangeEvent>) {
-        work.submit { handleRuleChange(record.value) }
+        val event = record.value
+        work.submit {
+            val cid = event.correlationId.ifBlank { UUID.randomUUID().toString() }
+            org.slf4j.MDC.put(ingsis.snippet.service.tracing.CorrelationIdFilter.CORRELATION_ID_KEY, cid)
+            try {
+                handleRuleChange(event)
+            } finally {
+                org.slf4j.MDC.remove(ingsis.snippet.service.tracing.CorrelationIdFilter.CORRELATION_ID_KEY)
+            }
+        }
     }
 
     private fun handleRuleChange(event: LintRulesChangeEvent) {
@@ -93,6 +102,8 @@ class RuleChangeConsumer(
                     version = snippet.version,
                     rulesVersion = rulesVersion,
                     rules = rules,
+                    correlationId =
+                        org.slf4j.MDC.get(ingsis.snippet.service.tracing.CorrelationIdFilter.CORRELATION_ID_KEY) ?: "",
                 )
             lintRequestProducer.emit(request)
         } catch (ex: Exception) {

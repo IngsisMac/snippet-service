@@ -41,6 +41,8 @@ class SnippetLintRequester(
                     version = event.version,
                     rulesVersion = ruleSet.rulesVersion,
                     rules = objectMapper.writeValueAsString(ruleSet.rules),
+                    correlationId =
+                        org.slf4j.MDC.get(ingsis.snippet.service.tracing.CorrelationIdFilter.CORRELATION_ID_KEY) ?: "",
                 ),
             )
             logger.info("Requested lint for snippet {} with rules v{}", event.snippetId, ruleSet.rulesVersion)

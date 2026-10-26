@@ -41,7 +41,16 @@ class FormatRuleChangeConsumer(
             .build()
 
     public override fun onMessage(record: ObjectRecord<String, FormatRulesChangeEvent>) {
-        work.submit { handleFormatRuleChange(record.value) }
+        val event = record.value
+        work.submit {
+            val cid = event.correlationId.ifBlank { UUID.randomUUID().toString() }
+            org.slf4j.MDC.put(ingsis.snippet.service.tracing.CorrelationIdFilter.CORRELATION_ID_KEY, cid)
+            try {
+                handleFormatRuleChange(event)
+            } finally {
+                org.slf4j.MDC.remove(ingsis.snippet.service.tracing.CorrelationIdFilter.CORRELATION_ID_KEY)
+            }
+        }
     }
 
     private fun handleFormatRuleChange(event: FormatRulesChangeEvent) {
@@ -86,6 +95,8 @@ class FormatRuleChangeConsumer(
                     version = snippet.version,
                     rulesVersion = rulesVersion,
                     rules = rules,
+                    correlationId =
+                        org.slf4j.MDC.get(ingsis.snippet.service.tracing.CorrelationIdFilter.CORRELATION_ID_KEY) ?: "",
                 )
             formatRequestProducer.emit(request)
         } catch (ex: Exception) {

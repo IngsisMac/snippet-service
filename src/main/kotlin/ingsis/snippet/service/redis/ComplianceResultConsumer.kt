@@ -39,7 +39,16 @@ class ComplianceResultConsumer(
             .build()
 
     public override fun onMessage(record: ObjectRecord<String, ComplianceResultEvent>) {
-        work.submit { applyResult(record.value) }
+        val event = record.value
+        work.submit {
+            val cid = event.correlationId.ifBlank { UUID.randomUUID().toString() }
+            org.slf4j.MDC.put(ingsis.snippet.service.tracing.CorrelationIdFilter.CORRELATION_ID_KEY, cid)
+            try {
+                applyResult(event)
+            } finally {
+                org.slf4j.MDC.remove(ingsis.snippet.service.tracing.CorrelationIdFilter.CORRELATION_ID_KEY)
+            }
+        }
     }
 
     private fun applyResult(event: ComplianceResultEvent) {
