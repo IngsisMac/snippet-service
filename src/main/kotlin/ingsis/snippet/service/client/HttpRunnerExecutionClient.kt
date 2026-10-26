@@ -96,6 +96,7 @@ class HttpRunnerExecutionClient(
         when (status) {
             HttpStatus.NOT_FOUND.value() -> "Execution not found"
             HttpStatus.TOO_MANY_REQUESTS.value() -> "Too many executions in progress"
+            HttpStatus.CONFLICT.value() -> "Execution already finished"
             else -> "The runner rejected the execution request"
         }
 }

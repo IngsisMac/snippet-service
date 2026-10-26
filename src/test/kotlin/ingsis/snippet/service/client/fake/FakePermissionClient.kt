@@ -18,6 +18,10 @@ class FakePermissionClient : PermissionClient {
         snippetMap[userId] = PermissionLevel.OWNER
     }
 
+    override fun deletePermissions(snippetId: UUID) {
+        permissions.remove(snippetId)
+    }
+
     override fun getPermission(
         snippetId: UUID,
         userId: String,

@@ -11,6 +11,8 @@ interface PermissionClient {
         userId: String,
     )
 
+    fun deletePermissions(snippetId: UUID)
+
     fun getPermission(
         snippetId: UUID,
         userId: String,

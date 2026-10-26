@@ -245,6 +245,7 @@ class SnippetService(
         access.requireOwner(snippet.id, userId)
         snippetRepository.delete(snippet)
         snippetStore.delete(id)
+        eventPublisher?.publishEvent(SnippetDeletedEvent(id))
     }
 
     private fun initialStatusFor(snippetId: UUID): SnippetStatus =

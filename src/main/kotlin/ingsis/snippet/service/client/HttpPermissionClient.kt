@@ -26,6 +26,14 @@ class HttpPermissionClient(
             .toBodilessEntity()
     }
 
+    override fun deletePermissions(snippetId: UUID) {
+        restClient
+            .delete()
+            .uri("/internal/permissions/{snippetId}", snippetId)
+            .retrieve()
+            .toBodilessEntity()
+    }
+
     override fun getPermission(
         snippetId: UUID,
         userId: String,

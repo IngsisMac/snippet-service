@@ -167,4 +167,17 @@ class HttpPermissionClientTest {
         assertEquals(PermissionLevel.WRITE, permissions[0].level)
         mockServer.verify()
     }
+
+    @Test
+    fun shouldDeletePermissionsSuccessfully() {
+        val snippetId = UUID.randomUUID()
+        mockServer
+            .expect(requestTo("http://permission-service:8081/internal/permissions/$snippetId"))
+            .andExpect(method(HttpMethod.DELETE))
+            .andRespond(withSuccess())
+
+        permissionClient.deletePermissions(snippetId)
+
+        mockServer.verify()
+    }
 }

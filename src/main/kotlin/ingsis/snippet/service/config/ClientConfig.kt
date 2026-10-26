@@ -10,11 +10,16 @@ import ingsis.snippet.service.client.auth.Auth0ClientCredentialsTokenProvider
 import ingsis.snippet.service.client.auth.BearerTokenInterceptor
 import ingsis.snippet.service.client.auth.M2mProperties
 import ingsis.snippet.service.client.auth.ServiceTokenProvider
+import ingsis.snippet.service.tracing.CorrelationIdFilter
+import org.slf4j.MDC
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.http.HttpRequest
+import org.springframework.http.client.ClientHttpRequestExecution
 import org.springframework.http.client.ClientHttpRequestInterceptor
+import org.springframework.http.client.ClientHttpResponse
 import org.springframework.http.client.SimpleClientHttpRequestFactory
 import org.springframework.web.client.RestClient
 import java.time.Duration
@@ -80,14 +85,33 @@ class ClientConfig {
                 .clone()
                 .baseUrl(target.url)
                 .requestFactory(requestFactory(target))
-                .requestInterceptors { it.addAll(interceptors) }
-                .build()
+                .requestInterceptors {
+                    it.add(CorrelationIdInterceptor())
+                    it.addAll(interceptors)
+                }.build()
 
         private fun requestFactory(target: ServiceTarget): SimpleClientHttpRequestFactory =
             SimpleClientHttpRequestFactory().apply {
                 setConnectTimeout(target.connectTimeout)
                 setReadTimeout(target.readTimeout)
             }
+    }
+}
+
+/**
+ * Propaga el header `X-Correlation-Id` a las llamadas HTTP salientes si existe en el MDC.
+ */
+class CorrelationIdInterceptor : ClientHttpRequestInterceptor {
+    override fun intercept(
+        request: HttpRequest,
+        body: ByteArray,
+        execution: ClientHttpRequestExecution,
+    ): ClientHttpResponse {
+        val correlationId = MDC.get(CorrelationIdFilter.CORRELATION_ID_KEY)
+        if (!correlationId.isNullOrBlank()) {
+            request.headers.set(CorrelationIdFilter.CORRELATION_ID_HEADER, correlationId)
+        }
+        return execution.execute(request, body)
     }
 }
 
