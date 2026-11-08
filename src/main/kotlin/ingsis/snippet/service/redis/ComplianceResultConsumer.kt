@@ -1,56 +1,82 @@
 package ingsis.snippet.service.redis
 
+import ingsis.snippet.redis.event.ComplianceResultEvent
 import ingsis.snippet.service.domain.model.ComplianceStatus
+import ingsis.snippet.service.domain.model.LintFindingsCodec
 import ingsis.snippet.service.domain.model.SnippetStatus
 import ingsis.snippet.service.domain.repository.SnippetStatusRepository
+import org.austral.ingsis.redis.RedisStreamConsumer
 import org.slf4j.LoggerFactory
-import org.springframework.data.redis.connection.stream.MapRecord
+import org.springframework.context.annotation.Profile
+import org.springframework.data.redis.connection.stream.ObjectRecord
+import org.springframework.data.redis.core.RedisTemplate
+import org.springframework.data.redis.stream.StreamReceiver.StreamReceiverOptions
 import org.springframework.stereotype.Component
-import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionTemplate
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
 @Component
+@Profile("!test")
 class ComplianceResultConsumer(
     private val statusRepository: SnippetStatusRepository,
-) {
+    redisTemplate: RedisTemplate<String, String>,
+    transactions: TransactionTemplate,
+    private val work: StreamWorkQueue = StreamWorkQueue("lint-result", transactions),
+) : RedisStreamConsumer<ComplianceResultEvent>(
+        streamKey = "lint-result",
+        groupId = "snippet-compliance-group",
+        redis = redisTemplate,
+    ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    @Transactional
-    fun processResult(record: MapRecord<String, String, String>) {
-        val valueMap = record.value
-        val snippetId = parseSnippetId(valueMap["snippetId"]) ?: return
-        val rulesVersion = valueMap["rulesVersion"]?.toIntOrNull() ?: 0
-        val statusStr = valueMap["status"] ?: "PENDING"
-        val findingsCount = valueMap["findingsCount"]?.toIntOrNull() ?: 0
+    public override fun options(): StreamReceiverOptions<String, ObjectRecord<String, ComplianceResultEvent>> =
+        StreamReceiverOptions
+            .builder()
+            .pollTimeout(Duration.ofSeconds(POLL_TIMEOUT_SECONDS))
+            .targetType(ComplianceResultEvent::class.java)
+            .build()
 
-        val current = statusRepository.findById(snippetId).orElse(SnippetStatus(snippetId = snippetId))
-
-        if (rulesVersion < current.rulesVersion) {
-            logger.warn(
-                "Discarding obsolete result v{} for snippet {} (current v{})",
-                rulesVersion,
-                snippetId,
-                current.rulesVersion
-            )
-            return
+    public override fun onMessage(record: ObjectRecord<String, ComplianceResultEvent>) {
+        val event = record.value
+        work.submit {
+            val cid = event.correlationId.ifBlank { UUID.randomUUID().toString() }
+            org.slf4j.MDC.put(ingsis.snippet.service.tracing.CorrelationIdFilter.CORRELATION_ID_KEY, cid)
+            try {
+                applyResult(event)
+            } finally {
+                org.slf4j.MDC.remove(ingsis.snippet.service.tracing.CorrelationIdFilter.CORRELATION_ID_KEY)
+            }
         }
-
-        updateStatus(current, rulesVersion, statusStr, findingsCount)
     }
 
-    private fun updateStatus(
-        status: SnippetStatus,
-        rulesVersion: Int,
-        statusStr: String,
-        findingsCount: Int,
-    ) {
-        status.rulesVersion = rulesVersion
-        status.status = parseStatus(statusStr)
-        status.findingsCount = findingsCount
-        status.lastCheckedAt = Instant.now()
-        statusRepository.save(status)
-        logger.info("Updated compliance status for snippet {} to {}", status.snippetId, status.status)
+    private fun applyResult(event: ComplianceResultEvent) {
+        val snippetId = parseSnippetId(event.snippetId) ?: return
+        val current = statusRepository.findById(snippetId).orElse(SnippetStatus(snippetId = snippetId))
+        if (isObsolete(event, current)) return
+
+        current.rulesVersion = event.rulesVersion
+        current.status = parseStatus(event.status)
+        current.findingsCount = event.findingsCount
+        current.findings = event.findings.ifBlank { LintFindingsCodec.EMPTY }
+        current.lastCheckedAt = Instant.now()
+        statusRepository.save(current)
+        logger.info("Updated compliance status for snippet {} to {}", current.snippetId, current.status)
+    }
+
+    private fun isObsolete(
+        event: ComplianceResultEvent,
+        current: SnippetStatus,
+    ): Boolean {
+        if (event.rulesVersion >= current.rulesVersion) return false
+        logger.warn(
+            "Discarding obsolete result v{} for snippet {} (current v{})",
+            event.rulesVersion,
+            event.snippetId,
+            current.rulesVersion,
+        )
+        return true
     }
 
     private fun parseSnippetId(idStr: String?): UUID? =
@@ -66,4 +92,8 @@ class ComplianceResultConsumer(
         } catch (_: Exception) {
             ComplianceStatus.FAILED
         }
+
+    companion object {
+        private const val POLL_TIMEOUT_SECONDS = 10L
+    }
 }

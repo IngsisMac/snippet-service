@@ -12,6 +12,16 @@ tasks.bootJar {
 repositories {
     mavenLocal()
     mavenCentral()
+    maven {
+        name = "CatedraPackages"
+        url = uri("https://maven.pkg.github.com/austral-ingsis/class-redis-streams")
+        credentials {
+            username = providers.gradleProperty("gpr.user").orNull ?: System.getenv("GITHUB_ACTOR")
+            password =
+                providers.gradleProperty("gpr.key").orNull ?: System.getenv("PACKAGES_TOKEN")
+                    ?: System.getenv("GITHUB_TOKEN")
+        }
+    }
 }
 
 dependencies {
@@ -23,6 +33,7 @@ dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
+    implementation("org.austral.ingsis:redis-streams-mvc:0.1.13")
 
     implementation("org.postgresql:postgresql")
     implementation("org.flywaydb:flyway-core")

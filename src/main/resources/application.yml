@@ -28,6 +28,9 @@ spring:
         jwt:
           issuer-uri: ${AUTH0_ISSUER_URI:https://dev-o02i7bmya113pn5u.us.auth0.com/}
           audiences: ${AUTH0_AUDIENCE:https://snippet-searcher.ingsis/}
+  mvc:
+    async:
+      request-timeout: 600s
 
 springdoc:
   api-docs:

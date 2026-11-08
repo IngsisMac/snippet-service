@@ -2,17 +2,24 @@ package ingsis.snippet.service.config
 
 import ingsis.snippet.service.client.HttpPermissionClient
 import ingsis.snippet.service.client.HttpRunnerClient
+import ingsis.snippet.service.client.HttpRunnerExecutionClient
 import ingsis.snippet.service.client.PermissionClient
 import ingsis.snippet.service.client.RunnerClient
+import ingsis.snippet.service.client.RunnerExecutionClient
 import ingsis.snippet.service.client.auth.Auth0ClientCredentialsTokenProvider
 import ingsis.snippet.service.client.auth.BearerTokenInterceptor
 import ingsis.snippet.service.client.auth.M2mProperties
 import ingsis.snippet.service.client.auth.ServiceTokenProvider
+import ingsis.snippet.service.tracing.CorrelationIdFilter
+import org.slf4j.MDC
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.http.HttpRequest
+import org.springframework.http.client.ClientHttpRequestExecution
 import org.springframework.http.client.ClientHttpRequestInterceptor
+import org.springframework.http.client.ClientHttpResponse
 import org.springframework.http.client.SimpleClientHttpRequestFactory
 import org.springframework.web.client.RestClient
 import java.time.Duration
@@ -44,6 +51,22 @@ class ClientConfig {
         builder: RestClient.Builder,
     ): RunnerClient = HttpRunnerClient(restClientFor(properties.runner, builder, BearerTokenInterceptor(tokenProvider)))
 
+    /**
+     * El stream de una ejecución interactiva puede quedar abierto minutos esperando que una
+     * persona escriba, así que usa su propio `read-timeout`. El corte real no lo pone este
+     * cliente sino el watchdog del runner: acá solo hace falta no cortar antes que él.
+     */
+    @Bean
+    fun runnerExecutionClient(
+        properties: ServicesProperties,
+        tokenProvider: ServiceTokenProvider,
+        builder: RestClient.Builder,
+    ): RunnerExecutionClient =
+        HttpRunnerExecutionClient(
+            restClientFor(properties.runner, builder, BearerTokenInterceptor(tokenProvider)),
+            restClientFor(properties.runner.streaming(), builder, BearerTokenInterceptor(tokenProvider)),
+        )
+
     @Bean
     fun permissionClient(
         properties: ServicesProperties,
@@ -62,14 +85,33 @@ class ClientConfig {
                 .clone()
                 .baseUrl(target.url)
                 .requestFactory(requestFactory(target))
-                .requestInterceptors { it.addAll(interceptors) }
-                .build()
+                .requestInterceptors {
+                    it.add(CorrelationIdInterceptor())
+                    it.addAll(interceptors)
+                }.build()
 
         private fun requestFactory(target: ServiceTarget): SimpleClientHttpRequestFactory =
             SimpleClientHttpRequestFactory().apply {
                 setConnectTimeout(target.connectTimeout)
                 setReadTimeout(target.readTimeout)
             }
+    }
+}
+
+/**
+ * Propaga el header `X-Correlation-Id` a las llamadas HTTP salientes si existe en el MDC.
+ */
+class CorrelationIdInterceptor : ClientHttpRequestInterceptor {
+    override fun intercept(
+        request: HttpRequest,
+        body: ByteArray,
+        execution: ClientHttpRequestExecution,
+    ): ClientHttpResponse {
+        val correlationId = MDC.get(CorrelationIdFilter.CORRELATION_ID_KEY)
+        if (!correlationId.isNullOrBlank()) {
+            request.headers.set(CorrelationIdFilter.CORRELATION_ID_HEADER, correlationId)
+        }
+        return execution.execute(request, body)
     }
 }
 
@@ -84,9 +126,14 @@ data class ServiceTarget(
     val url: String,
     val connectTimeout: Duration = DEFAULT_CONNECT_TIMEOUT,
     val readTimeout: Duration = DEFAULT_READ_TIMEOUT,
+    /** Solo lo usa el stream de ejecución del runner; el resto de las llamadas usa `readTimeout`. */
+    val streamReadTimeout: Duration = DEFAULT_STREAM_READ_TIMEOUT,
 ) {
+    fun streaming(): ServiceTarget = copy(readTimeout = streamReadTimeout)
+
     companion object {
         val DEFAULT_CONNECT_TIMEOUT: Duration = Duration.ofSeconds(2)
         val DEFAULT_READ_TIMEOUT: Duration = Duration.ofSeconds(3)
+        val DEFAULT_STREAM_READ_TIMEOUT: Duration = Duration.ofMinutes(5)
     }
 }
