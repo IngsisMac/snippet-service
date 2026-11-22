@@ -17,6 +17,7 @@ import ingsis.snippet.service.domain.repository.SnippetListingSort
 import ingsis.snippet.service.domain.repository.SnippetRepository
 import ingsis.snippet.service.domain.repository.SnippetStatusRepository
 import ingsis.snippet.service.store.SnippetStore
+import org.slf4j.LoggerFactory
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
@@ -49,6 +50,8 @@ class SnippetService(
     private val eventPublisher: ApplicationEventPublisher? = null,
     private val access: SnippetAccess = SnippetAccess(permissionClient),
 ) {
+    private val logger = LoggerFactory.getLogger(javaClass)
+
     @Transactional
     fun createSnippet(
         ownerId: String,
@@ -56,15 +59,7 @@ class SnippetService(
     ): SnippetResponse {
         validateSnippetSyntax(request.content, request.version)
 
-        val snippet =
-            Snippet(
-                name = request.name,
-                ownerId = ownerId,
-                language = request.language,
-                version = request.version,
-                description = request.description,
-            )
-        val savedSnippet = snippetRepository.save(snippet)
+        val savedSnippet = snippetRepository.save(newSnippet(ownerId, request))
         snippetStore.put(savedSnippet.id, request.content)
 
         val savedStatus = statusRepository.save(initialStatusFor(savedSnippet.id))
@@ -77,8 +72,25 @@ class SnippetService(
             SnippetContentChangedEvent(savedSnippet.id, request.content, savedSnippet.version, ownerId),
         )
 
-        return mapToResponse(savedSnippet, savedStatus, request.content)
+        return mapToResponse(
+            savedSnippet,
+            savedStatus,
+            request.content,
+            ownerNames = ownerNamesOf(listOf(savedSnippet)),
+            permission = PermissionLevel.OWNER,
+        )
     }
+
+    private fun newSnippet(
+        ownerId: String,
+        request: CreateSnippetRequest,
+    ) = Snippet(
+        name = request.name,
+        ownerId = ownerId,
+        language = request.language,
+        version = request.version,
+        description = request.description,
+    )
 
     @Transactional(readOnly = true)
     fun getSnippet(
@@ -86,9 +98,16 @@ class SnippetService(
         userId: String,
     ): SnippetResponse {
         val snippet = findSnippet(id)
-        access.requireView(snippet.id, userId)
+        val permission = access.requireView(snippet.id, userId)
         val status = statusRepository.findById(id).orElse(SnippetStatus(snippetId = id))
-        return mapToResponse(snippet, status, snippetStore.get(id), findingsCodec.decode(status.findings))
+        return mapToResponse(
+            snippet,
+            status,
+            snippetStore.get(id),
+            findingsCodec.decode(status.findings),
+            ownerNames = ownerNamesOf(listOf(snippet)),
+            permission = permission,
+        )
     }
 
     @Transactional(readOnly = true)
@@ -206,9 +225,10 @@ class SnippetService(
                 statusRepository.findAllById(snippetIds).associateBy { it.snippetId }
             }
 
+        val ownerNames = ownerNamesOf(page.content)
         return page.map { snippet ->
             val snippetStatus = statusMap[snippet.id] ?: SnippetStatus(snippetId = snippet.id)
-            mapToResponse(snippet, snippetStatus, content = null)
+            mapToResponse(snippet, snippetStatus, content = null, ownerNames = ownerNames)
         }
     }
 
@@ -219,7 +239,7 @@ class SnippetService(
         request: UpdateSnippetRequest,
     ): SnippetResponse {
         val snippet = findSnippet(id)
-        access.requireEdit(snippet.id, userId)
+        val permission = access.requireEdit(snippet.id, userId)
 
         request.name?.let { snippet.name = it }
         request.description?.let { snippet.description = it }
@@ -233,7 +253,14 @@ class SnippetService(
         val updated = snippetRepository.save(snippet)
 
         val status = statusRepository.findById(id).orElse(SnippetStatus(snippetId = id))
-        return mapToResponse(updated, status, request.content ?: currentContent, findingsCodec.decode(status.findings))
+        return mapToResponse(
+            updated,
+            status,
+            request.content ?: currentContent,
+            findingsCodec.decode(status.findings),
+            ownerNames = ownerNamesOf(listOf(updated)),
+            permission = permission,
+        )
     }
 
     @Transactional
@@ -310,11 +337,15 @@ class SnippetService(
         status: SnippetStatus,
         content: String?,
         findings: List<LintFindingClientDto>? = null,
+        ownerNames: Map<String, String> = emptyMap(),
+        permission: PermissionLevel? = null,
     ): SnippetResponse =
         SnippetResponse(
             id = snippet.id,
             name = snippet.name,
             ownerId = snippet.ownerId,
+            ownerName = ownerNames[snippet.ownerId],
+            permission = permission,
             language = snippet.language,
             version = snippet.version,
             description = snippet.description,
@@ -326,4 +357,17 @@ class SnippetService(
             createdAt = snippet.createdAt,
             updatedAt = snippet.updatedAt,
         )
+
+    /**
+     * Nombres de los autores de los snippets dados, en una sola consulta. Es información de
+     * presentación: si `permission-service` no responde, el listado sigue funcionando y la UI
+     * muestra el id del autor.
+     */
+    private fun ownerNamesOf(snippets: Collection<Snippet>): Map<String, String> =
+        try {
+            permissionClient.getUserNames(snippets.map { it.ownerId }.toSet())
+        } catch (ex: RestClientException) {
+            logger.warn("Could not resolve owner names: {}", ex.message)
+            emptyMap()
+        }
 }

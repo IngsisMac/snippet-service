@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.time.Instant
@@ -79,6 +80,32 @@ class SnippetControllerTest {
             ).andExpect(status().isCreated)
             .andExpect(jsonPath("$.id").value(sampleSnippet.id.toString()))
             .andExpect(jsonPath("$.name").value("Sample"))
+    }
+
+    @Test
+    fun shouldRenameSnippetThroughUpdateEndpoint() {
+        whenever(snippetService.updateSnippet(eq(sampleSnippet.id), eq("auth0|123"), any()))
+            .thenReturn(sampleSnippet.copy(name = "Renamed"))
+
+        mockMvc
+            .perform(
+                put("/api/snippets/${sampleSnippet.id}")
+                    .with(jwt().jwt { it.subject("auth0|123") })
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"name":"Renamed"}"""),
+            ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.name").value("Renamed"))
+    }
+
+    @Test
+    fun shouldRejectBlankNameOnUpdateEndpoint() {
+        mockMvc
+            .perform(
+                put("/api/snippets/${sampleSnippet.id}")
+                    .with(jwt().jwt { it.subject("auth0|123") })
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"name":"   "}"""),
+            ).andExpect(status().isBadRequest)
     }
 
     @Test

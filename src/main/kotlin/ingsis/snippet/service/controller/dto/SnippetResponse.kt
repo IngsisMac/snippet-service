@@ -1,6 +1,7 @@
 package ingsis.snippet.service.controller.dto
 
 import ingsis.snippet.service.client.dto.LintFindingClientDto
+import ingsis.snippet.service.client.dto.PermissionLevel
 import ingsis.snippet.service.domain.model.ComplianceStatus
 import java.time.Instant
 import java.util.UUID
@@ -8,11 +9,16 @@ import java.util.UUID
 /**
  * `content` y `findings` solo viajan en el detalle (`GET /api/snippets/{id}`): el listado los
  * omite para no pedir el contenido al asset-service ni deserializar hallazgos por cada fila.
+ * `permission` (nivel del usuario que consulta) también es solo del detalle y de la actualización:
+ * la UI lo usa para no ofrecer acciones que el backend rechazaría con 403. `ownerName` sale del
+ * directorio de usuarios y es nulo si el autor nunca inició sesión.
  */
 data class SnippetResponse(
     val id: UUID,
     val name: String,
     val ownerId: String,
+    val ownerName: String? = null,
+    val permission: PermissionLevel? = null,
     val language: String,
     val version: String,
     val description: String? = null,

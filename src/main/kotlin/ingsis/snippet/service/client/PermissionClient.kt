@@ -25,6 +25,12 @@ interface PermissionClient {
 
     fun getFormatRules(userId: String): Map<String, Any>
 
+    /**
+     * Nombre visible de cada usuario conocido por el directorio de `permission-service`. Quien nunca
+     * inició sesión (por ejemplo el cliente M2M) no figura y el llamador cae al id.
+     */
+    fun getUserNames(userIds: Collection<String>): Map<String, String> = emptyMap()
+
     fun getUserPermissions(
         userId: String,
         level: PermissionLevel? = null,

@@ -18,14 +18,16 @@ class FileTypeControllerTest {
     private lateinit var mockMvc: MockMvc
 
     @Test
-    fun shouldListPrintScriptAsTheOnlySupportedLanguage() {
+    fun shouldListEachPrintScriptVersionInAscendingOrder() {
         mockMvc
             .perform(get("/api/snippets/file-types").with(jwt()))
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$.length()").value(2))
             .andExpect(jsonPath("$[0].language").value("printscript"))
             .andExpect(jsonPath("$[0].extension").value("prs"))
-            .andExpect(jsonPath("$[0].version").value("1.1"))
+            .andExpect(jsonPath("$[0].version").value("1.0"))
+            .andExpect(jsonPath("$[1].language").value("printscript"))
+            .andExpect(jsonPath("$[1].version").value("1.1"))
     }
 
     @Test

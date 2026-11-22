@@ -89,7 +89,7 @@ class SnippetController(
     fun updateSnippet(
         @PathVariable id: UUID,
         @AuthenticationPrincipal jwt: Jwt,
-        @RequestBody request: UpdateSnippetRequest,
+        @Valid @RequestBody request: UpdateSnippetRequest,
     ): SnippetResponse {
         val userId = jwt.subject
         return snippetService.updateSnippet(id, userId, request)

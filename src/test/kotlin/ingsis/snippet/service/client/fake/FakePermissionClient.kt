@@ -39,6 +39,20 @@ class FakePermissionClient : PermissionClient {
     private val lintRules = ConcurrentHashMap<String, UserRulesResponse>()
     private val formatRules = ConcurrentHashMap<String, Map<String, Any>>()
     var lintRulesFailure: RuntimeException? = null
+    private val userNames = ConcurrentHashMap<String, String>()
+    var userNamesFailure: RuntimeException? = null
+
+    fun setUserName(
+        userId: String,
+        name: String,
+    ) {
+        userNames[userId] = name
+    }
+
+    override fun getUserNames(userIds: Collection<String>): Map<String, String> {
+        userNamesFailure?.let { throw it }
+        return userIds.mapNotNull { id -> userNames[id]?.let { id to it } }.toMap()
+    }
 
     fun setLintRules(
         userId: String,
