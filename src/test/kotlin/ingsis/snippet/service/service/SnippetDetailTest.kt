@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
+import org.springframework.web.client.ResourceAccessException
 import java.util.Optional
 import java.util.UUID
 
@@ -77,6 +78,46 @@ class SnippetDetailTest {
         val response = snippetService.createSnippet(ownerId, request)
 
         assertEquals("Calcula el promedio de las notas", response.description)
+    }
+
+    @Test
+    fun shouldReportTheUsersPermissionAndTheAuthorNameInTheDetail() {
+        val snippet = storedSnippet()
+        fakePermissionClient.setPermission(snippetId, "auth0|reader", PermissionLevel.READ)
+        fakePermissionClient.setUserName(ownerId, "Ana")
+        whenever(snippetRepository.findById(snippetId)).thenReturn(Optional.of(snippet))
+        whenever(statusRepository.findById(snippetId)).thenReturn(Optional.of(SnippetStatus(snippetId = snippetId)))
+
+        val asOwner = snippetService.getSnippet(snippetId, ownerId)
+        val asReader = snippetService.getSnippet(snippetId, "auth0|reader")
+
+        assertEquals(PermissionLevel.OWNER, asOwner.permission)
+        assertEquals(PermissionLevel.READ, asReader.permission)
+        assertEquals("Ana", asReader.ownerName)
+    }
+
+    @Test
+    fun shouldLeaveTheAuthorNameEmptyWhenTheDirectoryDoesNotKnowThem() {
+        val snippet = storedSnippet()
+        whenever(snippetRepository.findById(snippetId)).thenReturn(Optional.of(snippet))
+        whenever(statusRepository.findById(snippetId)).thenReturn(Optional.of(SnippetStatus(snippetId = snippetId)))
+
+        val detail = snippetService.getSnippet(snippetId, ownerId)
+
+        assertNull(detail.ownerName)
+        assertEquals(ownerId, detail.ownerId)
+    }
+
+    @Test
+    fun shouldKeepServingTheDetailWhenTheDirectoryIsDown() {
+        val snippet = storedSnippet()
+        fakePermissionClient.userNamesFailure = ResourceAccessException("down")
+        whenever(snippetRepository.findById(snippetId)).thenReturn(Optional.of(snippet))
+        whenever(statusRepository.findById(snippetId)).thenReturn(Optional.of(SnippetStatus(snippetId = snippetId)))
+
+        val detail = snippetService.getSnippet(snippetId, ownerId)
+
+        assertNull(detail.ownerName)
     }
 
     @Test

@@ -66,6 +66,26 @@ class HttpPermissionClientTest {
     }
 
     @Test
+    fun shouldResolveUserNamesInASingleRequest() {
+        mockServer
+            .expect(
+                requestTo("http://permission-service:8081/internal/users/names?ids=auth0%7Cana&ids=auth0%7Cbot"),
+            ).andExpect(method(HttpMethod.GET))
+            .andRespond(withSuccess("""{"auth0|ana":"Ana"}""", MediaType.APPLICATION_JSON))
+
+        val names = permissionClient.getUserNames(listOf("auth0|ana", "auth0|bot", "auth0|ana"))
+
+        assertEquals(mapOf("auth0|ana" to "Ana"), names)
+        mockServer.verify()
+    }
+
+    @Test
+    fun shouldReturnNoNamesWithoutCallingTheServiceWhenThereAreNoIds() {
+        assertEquals(emptyMap<String, String>(), permissionClient.getUserNames(emptyList()))
+        mockServer.verify()
+    }
+
+    @Test
     fun shouldReturnNoneWhenPermissionLevelIsUnknownOrEmpty() {
         val snippetId = UUID.randomUUID()
         val userId = "auth0|user2"

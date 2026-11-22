@@ -76,6 +76,18 @@ class HttpPermissionClient(
         return response?.rules ?: emptyMap()
     }
 
+    override fun getUserNames(userIds: Collection<String>): Map<String, String> {
+        if (userIds.isEmpty()) return emptyMap()
+        val responseType = object : ParameterizedTypeReference<Map<String, String>>() {}
+        return restClient
+            .get()
+            .uri { builder ->
+                builder.path("/internal/users/names").queryParam("ids", userIds.toSet().toList()).build()
+            }.retrieve()
+            .body(responseType)
+            ?: emptyMap()
+    }
+
     override fun getUserPermissions(
         userId: String,
         level: PermissionLevel?,

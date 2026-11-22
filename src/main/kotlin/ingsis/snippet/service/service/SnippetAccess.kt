@@ -16,23 +16,27 @@ import java.util.UUID
 class SnippetAccess(
     private val permissionClient: PermissionClient,
 ) {
+    /** Devuelve el nivel del usuario, que ya se consultó para decidir y el detalle lo reutiliza. */
     fun requireView(
         snippetId: UUID,
         userId: String,
-    ) {
-        if (permissionClient.getPermission(snippetId, userId) == PermissionLevel.NONE) {
+    ): PermissionLevel {
+        val permission = permissionClient.getPermission(snippetId, userId)
+        if (permission == PermissionLevel.NONE) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to view this snippet")
         }
+        return permission
     }
 
     fun requireEdit(
         snippetId: UUID,
         userId: String,
-    ) {
+    ): PermissionLevel {
         val permission = permissionClient.getPermission(snippetId, userId)
         if (permission != PermissionLevel.OWNER && permission != PermissionLevel.WRITE) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to edit this snippet")
         }
+        return permission
     }
 
     fun requireOwner(
