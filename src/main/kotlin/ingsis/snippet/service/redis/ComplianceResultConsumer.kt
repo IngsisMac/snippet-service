@@ -52,6 +52,12 @@ class ComplianceResultConsumer(
     }
 
     private fun applyResult(event: ComplianceResultEvent) {
+        logger.info(
+            "Consumed lint result from stream lint-result for snippet {} v{} status {}",
+            event.snippetId,
+            event.rulesVersion,
+            event.status,
+        )
         val snippetId = parseSnippetId(event.snippetId) ?: return
         val current = statusRepository.findById(snippetId).orElse(SnippetStatus(snippetId = snippetId))
         if (isObsolete(event, current)) return

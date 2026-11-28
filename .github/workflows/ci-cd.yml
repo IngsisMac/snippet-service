@@ -18,7 +18,7 @@ jobs:
   cd:
     needs: ci
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
-    uses: IngsisMac/snippet-plugins/.github/workflows/reusable-cd.yml@main
+    uses: IngsisMac/snippet-plugins/.github/workflows/reusable-cd.yml@dev
     with:
       image-name: snippet-service
     secrets: inherit

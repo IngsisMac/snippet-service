@@ -99,6 +99,7 @@ class FormatRuleChangeConsumer(
                         org.slf4j.MDC.get(ingsis.snippet.service.tracing.CorrelationIdFilter.CORRELATION_ID_KEY) ?: "",
                 )
             formatRequestProducer.emit(request)
+            logger.info("Published format-request snippet={} v{}", snippet.id, rulesVersion)
         } catch (ex: Exception) {
             logger.error("Failed to process format for snippet {}: {}", snippet.id, ex.message, ex)
         }

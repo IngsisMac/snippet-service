@@ -1,7 +1,7 @@
 <configuration>
     <appender name="console-appender" class="ch.qos.logback.core.ConsoleAppender">
         <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
-            <pattern>%highlight(%level) %cyan(%logger{32}) %mdc : %msg %n</pattern>
+            <pattern>%d{ISO8601} %-5level [%thread] %logger{32} [correlation-id=%X{correlation-id:-none}] : %msg%n</pattern>
         </encoder>
     </appender>
     <root level="info">

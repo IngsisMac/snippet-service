@@ -95,21 +95,28 @@ class RuleChangeConsumer(
                 updateStatus(snippet.id, rulesVersion, ComplianceStatus.FAILED)
                 return
             }
-            val request =
-                LintRequestEvent(
-                    snippetId = snippet.id.toString(),
-                    content = content,
-                    version = snippet.version,
-                    rulesVersion = rulesVersion,
-                    rules = rules,
-                    correlationId =
-                        org.slf4j.MDC.get(ingsis.snippet.service.tracing.CorrelationIdFilter.CORRELATION_ID_KEY) ?: "",
-                )
+            val request = buildLintRequest(snippet, content, rulesVersion, rules)
             lintRequestProducer.emit(request)
+            logger.info("Published lint-request snippet={} v{}", snippet.id, rulesVersion)
         } catch (ex: Exception) {
             logger.error("Failed to process lint for snippet {}: {}", snippet.id, ex.message, ex)
         }
     }
+
+    private fun buildLintRequest(
+        snippet: Snippet,
+        content: String,
+        rulesVersion: Int,
+        rules: String,
+    ) = LintRequestEvent(
+        snippetId = snippet.id.toString(),
+        content = content,
+        version = snippet.version,
+        rulesVersion = rulesVersion,
+        rules = rules,
+        correlationId =
+            org.slf4j.MDC.get(ingsis.snippet.service.tracing.CorrelationIdFilter.CORRELATION_ID_KEY) ?: "",
+    )
 
     @Suppress("TooGenericExceptionCaught")
     private fun fetchContentWithRetry(snippetId: UUID): String? {

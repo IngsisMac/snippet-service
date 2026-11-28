@@ -5,6 +5,8 @@ server:
     include-message: always
 
 spring:
+  config:
+    import: optional:configtree:/run/secrets/
   application:
     name: snippet-service
   datasource:

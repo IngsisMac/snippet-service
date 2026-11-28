@@ -52,18 +52,16 @@ class FormatResultConsumer(
     }
 
     private fun processFormatResult(event: FormatResultEvent) {
+        logger.info(
+            "Consumed format-result snippet={} v={} status={}",
+            event.snippetId,
+            event.rulesVersion,
+            event.status
+        )
         val snippetId = parseSnippetId(event.snippetId) ?: return
         val current = statusRepository.findById(snippetId).orElse(SnippetStatus(snippetId = snippetId))
 
-        if (event.rulesVersion < current.formatRulesVersion) {
-            logger.warn(
-                "Discarding obsolete format result v{} for snippet {} (current v{})",
-                event.rulesVersion,
-                event.snippetId,
-                current.formatRulesVersion,
-            )
-            return
-        }
+        if (isObsolete(event, current)) return
 
         if (event.status != "SUCCESS" || event.formattedContent.isBlank()) {
             logger.warn("Format failed or empty for snippet {}; preserving existing content in store", snippetId)
@@ -74,6 +72,20 @@ class FormatResultConsumer(
         snippetStore.put(snippetId, event.formattedContent)
         saveStatus(current, event.rulesVersion)
         logger.info("Updated formatted content and format rules version for snippet {}", snippetId)
+    }
+
+    private fun isObsolete(
+        event: FormatResultEvent,
+        current: SnippetStatus,
+    ): Boolean {
+        if (event.rulesVersion >= current.formatRulesVersion) return false
+        logger.warn(
+            "Discarding obsolete format result v{} for snippet {} (current v{})",
+            event.rulesVersion,
+            event.snippetId,
+            current.formatRulesVersion,
+        )
+        return true
     }
 
     private fun saveStatus(
